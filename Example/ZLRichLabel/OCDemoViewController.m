@@ -32,6 +32,12 @@ static UIColor *OCHex(uint32_t hex) {
 #define kBrown      OCHex(0x795548)
 #define kAmber      OCHex(0xFFC107)
 
+static UIColor *OCDynamic(UIColor *light, UIColor *dark) {
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *trait) {
+        return trait.userInterfaceStyle == UIUserInterfaceStyleDark ? dark : light;
+    }];
+}
+
 static NSString *OCQuote(NSString *s) {
     return s ? [NSString stringWithFormat:@"\"%@\"", s] : @"null";
 }
@@ -527,6 +533,15 @@ static NSString *OCQuote(NSString *s) {
 /// 用例 21 的状态（label rebuild 时 builder 会按状态重新创建 View）
 @property (nonatomic, assign) CGFloat boxWidth21;
 @property (nonatomic, assign) NSInteger likes21;
+/// 用例 22：外观 / 字号覆盖只作用在预览区域
+@property (nonatomic, weak) UIView *case22Preview;
+@property (nonatomic, weak) ZLTagRichLabel *case22Label;
+/// 用例 23：性能（渲染缓存 / 排版缓存）
+@property (nonatomic, weak) ZLRichLabel *case23Label;
+@property (nonatomic, weak) UILabel *case23Stats;
+@property (nonatomic, assign) BOOL mentionGreen23;
+@property (nonatomic, assign) BOOL highlightBlue23;
+@property (nonatomic, assign) NSInteger appended23;
 @end
 
 @implementation OCDemoViewController
@@ -578,6 +593,10 @@ static NSString *OCQuote(NSString *s) {
     [self case20];
     // 自定义 View 尺寸变化
     [self case21];
+    // 深色模式 / Dynamic Type
+    [self case22];
+    // 性能：渲染缓存 / 排版缓存
+    [self case23];
     [self.stackView addArrangedSubview:self.historyCard];
 
     [self refreshTapViews];
@@ -1188,6 +1207,298 @@ static NSString *OCQuote(NSString *s) {
     self.likes21 += 1;
     counter.text = [OCDemoWidgets likeText:self.likes21];
     [counter zl_setNeedsRichLabelLayout];
+}
+
+#pragma mark - 深色模式 / Dynamic Type
+
+/// 22. 深色模式自动重新渲染 + 按系统文字大小缩放（adjustsFontForContentSizeCategory）
+- (void)case22 {
+    NSString *name = @"22. 深色模式 / Dynamic Type";
+    NSString *source = @"Appearance: {mode}. Read the <h1>User Agreement</h1> <h2>NEW</h2>, "
+                       @"text, tags and the badge follow dark mode and the system text size.";
+
+    ZLTagRichLabel *label = [[ZLTagRichLabel alloc] initWithFrame:CGRectZero];
+    label.numberOfLines = 0;
+    label.verticalAlignment = TTTAttributedLabelVerticalAlignmentTop;
+
+    __weak typeof(self) weakSelf = self;
+    __weak ZLTagRichLabel *weakLabel = label;
+    [label update:^(ZLRichLabel *base) {
+        ZLTagRichLabel *v = (ZLTagRichLabel *)base;
+        v.adjustsFontForContentSizeCategory = YES;
+        // 动态颜色：深色 / 浅色切换后自动适配
+        v.style = @{NSFontAttributeName: [UIFont systemFontOfSize:15],
+                    NSForegroundColorAttributeName: UIColor.labelColor};
+        v.tagStyle = @{NSForegroundColorAttributeName: OCDynamic(kBlue, OCHex(0x90CAF9)),
+                       NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)};
+        v.onTagTap = ^(HTagInfo *info) { [weakSelf onTap:name info:info action:nil]; };
+        v.onParsed = ^(NSArray<HTagInfo *> *tags) { [weakSelf onParsed:name tags:tags]; };
+        // 自定义 View：builder 在外观 / 字号变化时会重新执行，用 scaledFont: 让 View 字号一起变化
+        v.tagWidgetBuilder = ^HTagWidget *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+            ZLTagRichLabel *strongLabel = weakLabel;
+            if (![info.name isEqualToString:@"h2"] || !strongLabel) { return nil; }
+            OCPaddingLabel *badge = [[OCPaddingLabel alloc] initWithInsets:UIEdgeInsetsMake(1, 5, 1, 5)];
+            badge.text = info.text;
+            badge.font = [strongLabel scaledFont:[UIFont boldSystemFontOfSize:10]];
+            badge.textColor = UIColor.whiteColor;
+            badge.backgroundColor = OCDynamic(kDeepOrange, OCHex(0xFF8A65));
+            badge.layer.cornerRadius = 4;
+            badge.layer.masksToBounds = YES;
+            return [[HTagWidget alloc] initWithView:badge
+                                               size:CGSizeZero
+                                           position:HTagWidgetPositionReplace
+                                          alignment:HTagWidgetAlignmentMiddle
+                                           tappable:YES];
+        };
+        // 规则 handler 也会重新执行：按当前外观返回不同内容
+        [v addRuleWithName:@"mode" pattern:@"\\{mode\\}" options:0 priority:0 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            BOOL dark = weakLabel.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
+            [ctx setText:dark ? @"🌙 Dark" : @"☀️ Light"
+              attributes:@{NSFontAttributeName: [UIFont boldSystemFontOfSize:15],
+                           NSForegroundColorAttributeName: UIColor.secondaryLabelColor}];
+        }];
+        v.text = source;
+    }];
+
+    // 预览区域：外观 / 字号的覆盖只作用在这里，不影响整个页面
+    UIView *preview = [[UIView alloc] init];
+    preview.backgroundColor = UIColor.secondarySystemBackgroundColor;
+    preview.layer.cornerRadius = 8;
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    [preview addSubview:label];
+    [NSLayoutConstraint activateConstraints:@[
+        [label.topAnchor constraintEqualToAnchor:preview.topAnchor constant:10],
+        [label.bottomAnchor constraintEqualToAnchor:preview.bottomAnchor constant:-10],
+        [label.leadingAnchor constraintEqualToAnchor:preview.leadingAnchor constant:10],
+        [label.trailingAnchor constraintEqualToAnchor:preview.trailingAnchor constant:-10],
+    ]];
+    self.case22Preview = preview;
+    self.case22Label = label;
+
+    UISegmentedControl *appearance = [[UISegmentedControl alloc] initWithItems:@[@"跟随系统", @"浅色", @"深色"]];
+    appearance.selectedSegmentIndex = 0;
+    [appearance addTarget:self action:@selector(appearanceChanged22:) forControlEvents:UIControlEventValueChanged];
+
+    UISegmentedControl *sizes = [[UISegmentedControl alloc] initWithItems:@[@"系统", @"XS", @"L", @"XXXL", @"AX3"]];
+    sizes.selectedSegmentIndex = 0;
+    [sizes addTarget:self action:@selector(sizeChanged22:) forControlEvents:UIControlEventValueChanged];
+    UILabel *sizeHint = [[UILabel alloc] init];
+    sizeHint.numberOfLines = 0;
+    sizeHint.font = [UIFont systemFontOfSize:11];
+    sizeHint.textColor = [UIColor colorWithWhite:0 alpha:0.45];
+    if (@available(iOS 17.0, *)) {
+        sizeHint.text = @"文字大小只覆盖预览区域；选「系统」则跟随 设置 › 显示与亮度 › 文字大小";
+    } else {
+        sizes.enabled = NO;
+        sizeHint.text = @"iOS 17 以下请在 设置 › 显示与亮度 › 文字大小 中调整";
+    }
+
+    UISwitch *scaleSwitch = [[UISwitch alloc] init];
+    scaleSwitch.on = YES;
+    [scaleSwitch addTarget:self action:@selector(scaleSwitchChanged22:) forControlEvents:UIControlEventValueChanged];
+    UILabel *switchTitle = [[UILabel alloc] init];
+    switchTitle.text = @"adjustsFontForContentSizeCategory";
+    switchTitle.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
+    UIStackView *switchRow = [[UIStackView alloc] initWithArrangedSubviews:@[switchTitle, scaleSwitch]];
+    switchRow.alignment = UIStackViewAlignmentCenter;
+
+    UIStackView *content = [[UIStackView alloc] initWithArrangedSubviews:@[appearance, sizes, sizeHint, switchRow, preview]];
+    content.axis = UILayoutConstraintAxisVertical;
+    content.spacing = 8;
+
+    OCDemoCard *card = [[OCDemoCard alloc] initWithTitle:name source:source content:content];
+    self.cards[name] = card;
+    [self.stackView addArrangedSubview:card];
+}
+
+- (void)appearanceChanged22:(UISegmentedControl *)sender {
+    UIUserInterfaceStyle styles[] = {UIUserInterfaceStyleUnspecified, UIUserInterfaceStyleLight, UIUserInterfaceStyleDark};
+    self.case22Preview.overrideUserInterfaceStyle = styles[sender.selectedSegmentIndex];
+}
+
+- (void)sizeChanged22:(UISegmentedControl *)sender {
+    if (@available(iOS 17.0, *)) {
+        UIView *preview = self.case22Preview;
+        NSArray<UIContentSizeCategory> *categories = @[UIContentSizeCategoryExtraSmall, UIContentSizeCategoryLarge,
+                                                       UIContentSizeCategoryExtraExtraExtraLarge,
+                                                       UIContentSizeCategoryAccessibilityExtraLarge];
+        if (sender.selectedSegmentIndex == 0) {
+            [preview.traitOverrides removeTrait:UITraitPreferredContentSizeCategory.class];
+        } else {
+            preview.traitOverrides.preferredContentSizeCategory = categories[sender.selectedSegmentIndex - 1];
+        }
+    }
+}
+
+- (void)scaleSwitchChanged22:(UISwitch *)sender {
+    self.case22Label.adjustsFontForContentSizeCategory = sender.isOn;
+}
+
+#pragma mark - 性能
+
+/// 23. 性能：命中的渲染结果按命中缓存、排版结果按「文本 + 宽度」缓存
+- (void)case23 {
+    NSString *name = @"23. 性能：渲染缓存 / 排版缓存";
+    NSInteger count = 200;
+    NSMutableString *source = [NSMutableString string];
+    for (NSInteger i = 0; i < count; i++) {
+        [source appendFormat:@"@user%ld [smile] #topic%ld# ", (long)i, (long)(i % 10)];
+    }
+    NSString *shownSource = [NSString stringWithFormat:
+        @"@user0 [smile] #topic0# @user1 [smile] #topic1# …（重复 %ld 次，共 %ld 个命中）", (long)count, (long)count * 3];
+
+    ZLRichLabel *label = [[ZLRichLabel alloc] initWithFrame:CGRectZero];
+    label.numberOfLines = 4;
+    label.lineBreakMode = NSLineBreakByTruncatingTail;
+    label.verticalAlignment = TTTAttributedLabelVerticalAlignmentTop;
+    self.case23Label = label;
+
+    __weak typeof(self) weakSelf = self;
+    [label update:^(ZLRichLabel *v) {
+        v.style = OCDemoViewController.baseStyle;
+        v.highlightStyle = @{NSBackgroundColorAttributeName: [kAmber colorWithAlphaComponent:0.4]};
+        [v addRuleWithName:@"mention" pattern:@"@\\w+" options:0 priority:0 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            BOOL green = weakSelf.mentionGreen23;
+            [ctx addAttributes:@{NSForegroundColorAttributeName: green ? kGreen : kPurple}];
+            ctx.onTap = [weakSelf ruleTapForCase:name ctx:ctx action:@"rule onTap"];
+        }];
+        [v addRuleWithName:@"emoji" pattern:@"\\[smile\\]" options:0 priority:0 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            NSTextAttachment *attachment = [[NSTextAttachment alloc] init];
+            attachment.image = [[UIImage systemImageNamed:@"face.smiling"] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+            attachment.bounds = CGRectMake(0, 0, 16, 16);
+            [ctx.attributedString setAttributedString:[NSAttributedString attributedStringWithAttachment:attachment]];
+            [ctx addAttributes:@{NSForegroundColorAttributeName: kOrange}];
+        }];
+        [v addRuleWithName:@"topic" pattern:@"#\\w+#" options:0 priority:0 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            [ctx addAttributes:@{NSForegroundColorAttributeName: kBlue}];
+        }];
+    }];
+
+    UILabel *stats = [[UILabel alloc] init];
+    stats.numberOfLines = 0;
+    stats.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
+    stats.textColor = [UIColor colorWithWhite:0 alpha:0.7];
+    self.case23Stats = stats;
+
+    NSArray<NSArray *> *buttons = @[
+        @[@"改按下高亮", NSStringFromSelector(@selector(highlight23))],
+        @[@"末尾追加文字", NSStringFromSelector(@selector(append23))],
+        @[@"只刷新 @提及", NSStringFromSelector(@selector(recolorMentions23))],
+        @[@"rebuild()", NSStringFromSelector(@selector(rebuild23))],
+        @[@"sizeThatFits ×100", NSStringFromSelector(@selector(measureSize23))],
+        @[@"解析 1.5 万命中", NSStringFromSelector(@selector(parse23))],
+    ];
+    NSMutableArray<UIView *> *arranged = [NSMutableArray arrayWithObject:label];
+    for (NSUInteger start = 0; start < buttons.count; start += 3) {
+        UIStackView *row = [[UIStackView alloc] init];
+        row.distribution = UIStackViewDistributionFillEqually;
+        row.spacing = 6;
+        for (NSUInteger i = start; i < MIN(start + 3, buttons.count); i++) {
+            UIButtonConfiguration *config = [UIButtonConfiguration tintedButtonConfiguration];
+            config.title = buttons[i][0];
+            config.buttonSize = UIButtonConfigurationSizeMini;
+            UIButton *button = [UIButton buttonWithConfiguration:config primaryAction:nil];
+            button.titleLabel.adjustsFontSizeToFitWidth = YES;
+            [button addTarget:self action:NSSelectorFromString(buttons[i][1]) forControlEvents:UIControlEventTouchUpInside];
+            [row addArrangedSubview:button];
+        }
+        [arranged addObject:row];
+    }
+    [arranged addObject:stats];
+
+    UIStackView *content = [[UIStackView alloc] initWithArrangedSubviews:arranged];
+    content.axis = UILayoutConstraintAxisVertical;
+    content.spacing = 8;
+
+    OCDemoCard *card = [[OCDemoCard alloc] initWithTitle:name source:shownSource content:content];
+    self.cards[name] = card;
+    [self.stackView addArrangedSubview:card];
+
+    [self measure23:@"首次渲染" block:^{ label.text = source; }];
+}
+
+/// 执行操作并展示耗时与缓存统计
+- (void)measure23:(NSString *)title block:(void (^)(void))block {
+    ZLRichLabel *label = self.case23Label;
+    if (!label) { return; }
+    [label.statistics reset];
+    CFTimeInterval start = CACurrentMediaTime();
+    block();
+    [label.superview layoutIfNeeded];
+    double ms = (CACurrentMediaTime() - start) * 1000;
+    ZLRichLabelStatistics *s = label.statistics;
+    NSInteger imageViews = 0;
+    for (UIView *view in label.subviews) { if ([view isKindOfClass:UIImageView.class]) { imageViews++; } }
+    self.case23Stats.text = [NSString stringWithFormat:
+        @"%@：%.2f ms\nhandler 执行 %ld 次，复用 %ld 个命中\n渲染 %ld 次，创建 framesetter %ld 次，尺寸缓存命中 %ld 次\n当前命中 %lu 个，自定义 View %ld 个",
+        title, ms, (long)s.handlerCalls, (long)s.reusedMatches, (long)s.renders, (long)s.framesetterCreations,
+        (long)s.sizeCacheHits, (unsigned long)label.matches.count, (long)imageViews];
+}
+
+/// 按下高亮不影响 handler 输出：全部复用
+- (void)highlight23 {
+    self.highlightBlue23 = !self.highlightBlue23;
+    UIColor *color = self.highlightBlue23 ? kBlue : kAmber;
+    ZLRichLabel *label = self.case23Label;
+    [self measure23:@"改按下高亮" block:^{
+        label.highlightStyle = @{NSBackgroundColorAttributeName: [color colorWithAlphaComponent:0.4]};
+    }];
+}
+
+/// 末尾追加：前面命中的位置和内容都没变，只渲染新增的命中
+- (void)append23 {
+    self.appended23 += 1;
+    NSInteger n = self.appended23;
+    ZLRichLabel *label = self.case23Label;
+    [self measure23:[NSString stringWithFormat:@"末尾追加 @new%ld", (long)n] block:^{
+        label.text = [label.rawText stringByAppendingFormat:@"@new%ld ", (long)n];
+    }];
+}
+
+/// handler 依赖的外部数据变了，只作废这条规则：表情图片和话题直接复用
+- (void)recolorMentions23 {
+    self.mentionGreen23 = !self.mentionGreen23;
+    ZLRichLabel *label = self.case23Label;
+    [self measure23:@"只刷新 @提及（setNeedsRebuildForRuleNamed:）" block:^{
+        [label setNeedsRebuildForRuleNamed:@"mention"];
+    }];
+}
+
+/// 强制全部重新执行（对比用）
+- (void)rebuild23 {
+    ZLRichLabel *label = self.case23Label;
+    [self measure23:@"rebuild 全部重新执行" block:^{ [label rebuild]; }];
+}
+
+/// 同一宽度重复计算尺寸：只有第一次真正排版
+- (void)measureSize23 {
+    ZLRichLabel *label = self.case23Label;
+    [self measure23:@"sizeThatFits ×100" block:^{
+        CGSize fitting = CGSizeMake(CGRectGetWidth(label.bounds), CGFLOAT_MAX);
+        for (NSInteger i = 0; i < 100; i++) { [label sizeThatFits:fitting]; }
+    }];
+}
+
+/// 解析器：1.5 万个命中按优先级去重（原来 O(n²)，现在二分查找 O(n log n)）
+- (void)parse23 {
+    NSMutableString *text = [NSMutableString string];
+    for (NSInteger i = 0; i < 5000; i++) { [text appendString:@"@user #tag# word "]; }
+    void (^noop)(TagRichRuleContext *) = ^(TagRichRuleContext *ctx) {};
+    NSArray<TagRichRule *> *rules = @[
+        [[TagRichRule alloc] initWithName:@"mention" pattern:@"@\\w+" options:0 priority:0 error:nil handler:noop],
+        [[TagRichRule alloc] initWithName:@"topic" pattern:@"#\\w+#" options:0 priority:0 error:nil handler:noop],
+        [[TagRichRule alloc] initWithName:@"word" pattern:@"\\w+" options:0 priority:-1 error:nil handler:noop],
+    ];
+    CFTimeInterval start = CACurrentMediaTime();
+    NSArray<TagRichMatch *> *matches = [TagRichParser matchesInString:text rules:rules];
+    double ms = (CACurrentMediaTime() - start) * 1000;
+    self.case23Stats.text = [NSString stringWithFormat:
+        @"TagRichParser.resolve：%.2f ms\n文本 %lu 字符，3 条规则，生效命中 %lu 个\n（含正则匹配耗时；label 未参与）",
+        ms, (unsigned long)text.length, (unsigned long)matches.count];
 }
 
 @end

@@ -45,6 +45,15 @@ final class HTagDemoPage: UIViewController {
     /// 用例 21 的状态（label rebuild 时 builder 会按状态重新创建 View）
     private var boxWidth21: CGFloat = 24
     private var likes21 = 0
+    /// 用例 22：外观 / 字号覆盖只作用在预览区域
+    private weak var case22Preview: UIView?
+    private weak var case22Label: ZLTagRichLabel?
+    /// 用例 23：性能（渲染缓存 / 排版缓存）
+    private weak var case23Label: ZLRichLabel?
+    private weak var case23Stats: UILabel?
+    private var mentionPurple23 = true
+    private var highlightYellow23 = true
+    private var appended23 = 0
 
     private static let baseStyle: HTagTextStyle = [
         .font: UIFont.systemFont(ofSize: 15),
@@ -84,6 +93,10 @@ final class HTagDemoPage: UIViewController {
         case20()
         // 自定义 View 尺寸变化
         case21()
+        // 深色模式 / Dynamic Type
+        case22()
+        // 性能：渲染缓存 / 排版缓存
+        case23()
         stackView.addArrangedSubview(historyCard)
 
         refreshTapViews()
@@ -659,6 +672,270 @@ final class HTagDemoPage: UIViewController {
         counter.text = DemoWidgets.likeText(likes21)
         counter.zl_setNeedsRichLabelLayout()
     }
+
+    // MARK: - 深色模式 / Dynamic Type
+
+    /// 22. 深色模式自动重新渲染 + 按系统文字大小缩放（adjustsFontForContentSizeCategory）
+    private func case22() {
+        let name = "22. 深色模式 / Dynamic Type"
+        let source = "Appearance: {mode}. Read the <h1>User Agreement</h1> <h2>NEW</h2>, "
+            + "text, tags and the badge follow dark mode and the system text size."
+
+        let label = ZLTagRichLabel(frame: .zero)
+        label.numberOfLines = 0
+        label.verticalAlignment = .top
+        label.update { [weak label] v in
+            v.adjustsFontForContentSizeCategory = true
+            // 动态颜色：深色 / 浅色切换后自动适配
+            v.style = [.font: UIFont.systemFont(ofSize: 15), .foregroundColor: UIColor.label]
+            v.tagStyle = [
+                .foregroundColor: UIColor.dynamic(light: .mBlue, dark: UIColor(hex: 0x90CAF9)),
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+            ]
+            v.onTagTap = { [weak self] info in self?.onTap(name, info) }
+            v.onParsed = { [weak self] tags in self?.onParsed(name, tags) }
+            // 自定义 View：builder 在外观 / 字号变化时会重新执行，用 scaledFont 让 View 字号一起变化
+            v.tagWidgetBuilder = { info, _ in
+                guard info.name == "h2", let label = label else { return nil }
+                let badge = PaddingLabel(insets: UIEdgeInsets(top: 1, left: 5, bottom: 1, right: 5))
+                badge.text = info.text
+                badge.font = label.scaledFont(.boldSystemFont(ofSize: 10))
+                badge.textColor = .white
+                badge.backgroundColor = .dynamic(light: .mDeepOrange, dark: UIColor(hex: 0xFF8A65))
+                badge.layer.cornerRadius = 4
+                badge.layer.masksToBounds = true
+                return HTagWidget(view: badge)
+            }
+            // 规则 handler 也会重新执行：按当前外观返回不同内容
+            try? v.addRule(name: "mode", pattern: "\\{mode\\}") { ctx in
+                let dark = label?.traitCollection.userInterfaceStyle == .dark
+                ctx.setText(dark ? "🌙 Dark" : "☀️ Light",
+                            attributes: [.font: UIFont.boldSystemFont(ofSize: 15), .foregroundColor: UIColor.secondaryLabel])
+            }
+            v.text = source
+        }
+
+        // 预览区域：外观 / 字号的覆盖只作用在这里，不影响整个页面
+        let preview = UIView()
+        preview.backgroundColor = .secondarySystemBackground
+        preview.layer.cornerRadius = 8
+        label.translatesAutoresizingMaskIntoConstraints = false
+        preview.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: preview.topAnchor, constant: 10),
+            label.bottomAnchor.constraint(equalTo: preview.bottomAnchor, constant: -10),
+            label.leadingAnchor.constraint(equalTo: preview.leadingAnchor, constant: 10),
+            label.trailingAnchor.constraint(equalTo: preview.trailingAnchor, constant: -10),
+        ])
+        case22Preview = preview
+        case22Label = label
+
+        let appearance = UISegmentedControl(items: ["跟随系统", "浅色", "深色"])
+        appearance.selectedSegmentIndex = 0
+        appearance.addTarget(self, action: #selector(appearanceChanged22(_:)), for: .valueChanged)
+
+        let sizes = UISegmentedControl(items: Self.sizeCategories22.map { $0.0 })
+        sizes.selectedSegmentIndex = 0
+        sizes.addTarget(self, action: #selector(sizeChanged22(_:)), for: .valueChanged)
+        let sizeHint = CardView.label("", font: .systemFont(ofSize: 11), color: UIColor(white: 0, alpha: 0.45))
+        if #available(iOS 17.0, *) {
+            sizeHint.text = "文字大小只覆盖预览区域；选「系统」则跟随 设置 › 显示与亮度 › 文字大小"
+        } else {
+            sizes.isEnabled = false
+            sizeHint.text = "iOS 17 以下请在 设置 › 显示与亮度 › 文字大小 中调整"
+        }
+
+        let scaleSwitch = UISwitch()
+        scaleSwitch.isOn = true
+        scaleSwitch.addTarget(self, action: #selector(scaleSwitchChanged22(_:)), for: .valueChanged)
+        let switchRow = UIStackView(arrangedSubviews: [
+            CardView.label("adjustsFontForContentSizeCategory", font: .monospacedSystemFont(ofSize: 12, weight: .regular)),
+            scaleSwitch,
+        ])
+        switchRow.alignment = .center
+
+        let content = UIStackView(arrangedSubviews: [appearance, sizes, sizeHint, switchRow, preview])
+        content.axis = .vertical
+        content.spacing = 8
+
+        let card = DemoCard(title: name, source: source, content: content)
+        cards[name] = card
+        stackView.addArrangedSubview(card)
+    }
+
+    private static let sizeCategories22: [(String, UIContentSizeCategory?)] = [
+        ("系统", nil), ("XS", .extraSmall), ("L", .large), ("XXXL", .extraExtraExtraLarge), ("AX3", .accessibilityExtraLarge),
+    ]
+
+    @objc private func appearanceChanged22(_ sender: UISegmentedControl) {
+        let styles: [UIUserInterfaceStyle] = [.unspecified, .light, .dark]
+        case22Preview?.overrideUserInterfaceStyle = styles[sender.selectedSegmentIndex]
+    }
+
+    @objc private func sizeChanged22(_ sender: UISegmentedControl) {
+        guard #available(iOS 17.0, *), let preview = case22Preview else { return }
+        if let category = Self.sizeCategories22[sender.selectedSegmentIndex].1 {
+            preview.traitOverrides.preferredContentSizeCategory = category
+        } else {
+            preview.traitOverrides.remove(UITraitPreferredContentSizeCategory.self)
+        }
+    }
+
+    @objc private func scaleSwitchChanged22(_ sender: UISwitch) {
+        case22Label?.adjustsFontForContentSizeCategory = sender.isOn
+    }
+
+    // MARK: - 性能
+
+    /// 23. 性能：命中的渲染结果按命中缓存、排版结果按「文本 + 宽度」缓存
+    private func case23() {
+        let name = "23. 性能：渲染缓存 / 排版缓存"
+        let count = 200
+        let source = (0..<count).map { "@user\($0) [smile] #topic\($0 % 10)# " }.joined()
+        let shownSource = "@user0 [smile] #topic0# @user1 [smile] #topic1# …（重复 \(count) 次，共 \(count * 3) 个命中）"
+
+        let label = ZLRichLabel(frame: .zero)
+        label.numberOfLines = 4
+        label.lineBreakMode = .byTruncatingTail
+        label.verticalAlignment = .top
+        case23Label = label
+        label.update { v in
+            v.style = HTagDemoPage.baseStyle
+            v.highlightStyle = [.backgroundColor: UIColor.mAmber.withAlphaComponent(0.4)]
+            try? v.addRule(name: "mention", pattern: "@\\w+") { [weak self] ctx in
+                let purple = self?.mentionPurple23 ?? true
+                ctx.addAttributes([.foregroundColor: purple ? UIColor.mPurple : UIColor.mGreen])
+                ctx.onTap = { [weak self, info = self?.ruleInfo(ctx)] in
+                    if let info = info { self?.onTap(name, info, action: "rule onTap") }
+                }
+            }
+            try? v.addRule(name: "emoji", pattern: "\\[smile\\]") { ctx in
+                let attachment = NSTextAttachment()
+                attachment.image = UIImage(systemName: "face.smiling")?.withRenderingMode(.alwaysTemplate)
+                attachment.bounds = CGRect(x: 0, y: 0, width: 16, height: 16)
+                ctx.attributedString.setAttributedString(NSAttributedString(attachment: attachment))
+                ctx.addAttributes([.foregroundColor: UIColor.mOrange])
+            }
+            try? v.addRule(name: "topic", pattern: "#\\w+#") { ctx in
+                ctx.addAttributes([.foregroundColor: UIColor.mBlue])
+            }
+        }
+
+        let stats = CardView.label("", font: .monospacedSystemFont(ofSize: 11, weight: .regular),
+                                   color: UIColor(white: 0, alpha: 0.7))
+        stats.numberOfLines = 0
+        case23Stats = stats
+
+        let buttons: [(String, Selector)] = [
+            ("改按下高亮", #selector(highlight23)),
+            ("末尾追加文字", #selector(append23)),
+            ("只刷新 @提及", #selector(recolorMentions23)),
+            ("rebuild()", #selector(rebuild23)),
+            ("sizeThatFits ×100", #selector(measureSize23)),
+            ("解析 1.5 万命中", #selector(parse23)),
+        ]
+        let rows = stride(from: 0, to: buttons.count, by: 3).map { start -> UIStackView in
+            let row = UIStackView(arrangedSubviews: buttons[start..<min(start + 3, buttons.count)].map { title, action in
+                var config = UIButton.Configuration.tinted()
+                config.title = title
+                config.buttonSize = .mini
+                let button = UIButton(configuration: config)
+                button.titleLabel?.adjustsFontSizeToFitWidth = true
+                button.addTarget(self, action: action, for: .touchUpInside)
+                return button
+            })
+            row.distribution = .fillEqually
+            row.spacing = 6
+            return row
+        }
+
+        let content = UIStackView(arrangedSubviews: [label] + rows + [stats])
+        content.axis = .vertical
+        content.spacing = 8
+
+        let card = DemoCard(title: name, source: shownSource, content: content)
+        cards[name] = card
+        stackView.addArrangedSubview(card)
+
+        measure23("首次渲染") { label.text = source }
+    }
+
+    /// 规则命中 → 点击面板展示的信息（不要在 onTap 里强引用 ctx）
+    private func ruleInfo(_ ctx: TagRichRuleContext) -> HTagInfo {
+        return HTagInfo(index: ctx.match.index, name: "rule:\(ctx.ruleName)",
+                        text: ctx.attributedString.string, raw: ctx.matchedText)
+    }
+
+    /// 执行操作并展示耗时与缓存统计
+    private func measure23(_ title: String, _ block: () -> Void) {
+        guard let label = case23Label else { return }
+        label.statistics.reset()
+        let start = CACurrentMediaTime()
+        block()
+        label.superview?.layoutIfNeeded()
+        let ms = (CACurrentMediaTime() - start) * 1000
+        let s = label.statistics
+        case23Stats?.text = String(format: "%@：%.2f ms\n", title, ms)
+            + "handler 执行 \(s.handlerCalls) 次，复用 \(s.reusedMatches) 个命中\n"
+            + "渲染 \(s.renders) 次，创建 framesetter \(s.framesetterCreations) 次，尺寸缓存命中 \(s.sizeCacheHits) 次\n"
+            + "当前命中 \(label.matches.count) 个，自定义 View \(label.subviews.filter { $0 is UIImageView }.count) 个"
+    }
+
+    /// 按下高亮不影响 handler 输出：全部复用
+    @objc private func highlight23() {
+        highlightYellow23.toggle()
+        measure23("改按下高亮") {
+            case23Label?.highlightStyle = [.backgroundColor: (highlightYellow23 ? UIColor.mAmber : UIColor.mBlue)
+                .withAlphaComponent(0.4)]
+        }
+    }
+
+    /// 末尾追加：前面命中的位置和内容都没变，只渲染新增的命中
+    @objc private func append23() {
+        appended23 += 1
+        measure23("末尾追加 @new\(appended23)") {
+            guard let label = case23Label else { return }
+            label.text = label.rawText + "@new\(appended23) "
+        }
+    }
+
+    /// handler 依赖的外部数据变了，只作废这条规则：表情图片和话题直接复用
+    @objc private func recolorMentions23() {
+        mentionPurple23.toggle()
+        measure23("只刷新 @提及（setNeedsRebuild(forRuleNamed:)）") {
+            case23Label?.setNeedsRebuild(forRuleNamed: "mention")
+        }
+    }
+
+    /// 强制全部重新执行（对比用）
+    @objc private func rebuild23() {
+        measure23("rebuild() 全部重新执行") { case23Label?.rebuild() }
+    }
+
+    /// 同一宽度重复计算尺寸：只有第一次真正排版
+    @objc private func measureSize23() {
+        measure23("sizeThatFits ×100") {
+            guard let label = case23Label else { return }
+            let fitting = CGSize(width: label.bounds.width, height: .greatestFiniteMagnitude)
+            for _ in 0..<100 { _ = label.sizeThatFits(fitting) }
+        }
+    }
+
+    /// 解析器：1.5 万个命中按优先级去重（原来 O(n²)，现在二分查找 O(n log n)）
+    @objc private func parse23() {
+        let text = String(repeating: "@user #tag# word ", count: 5000)
+        let rules = [
+            try! TagRichRule(name: "mention", pattern: "@\\w+") { _ in },
+            try! TagRichRule(name: "topic", pattern: "#\\w+#") { _ in },
+            try! TagRichRule(name: "word", pattern: "\\w+", priority: -1) { _ in },
+        ]
+        let start = CACurrentMediaTime()
+        let matches = TagRichParser.resolve(text, rules: rules)
+        let ms = (CACurrentMediaTime() - start) * 1000
+        case23Stats?.text = String(format: "TagRichParser.resolve：%.2f ms\n", ms)
+            + "文本 \((text as NSString).length) 字符，3 条规则，生效命中 \(matches.count) 个\n"
+            + "（含正则匹配耗时；label 未参与）"
+    }
 }
 
 
@@ -1003,6 +1280,10 @@ private final class PaddingLabel: UILabel {
 // MARK: - Material 颜色
 
 private extension UIColor {
+    static func dynamic(light: UIColor, dark: UIColor) -> UIColor {
+        return UIColor { $0.userInterfaceStyle == .dark ? dark : light }
+    }
+
     convenience init(hex: UInt32, alpha: CGFloat = 1) {
         self.init(red: CGFloat((hex >> 16) & 0xFF) / 255,
                   green: CGFloat((hex >> 8) & 0xFF) / 255,

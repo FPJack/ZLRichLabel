@@ -47,6 +47,34 @@ public final class ZLRichSegment: NSObject {
 /// }
 /// label.text = "hello @alice"
 /// ```
+/// 渲染 / 排版统计，用于观察缓存效果（调试用，数值只增不减，可调用 `reset()` 清零）
+@objcMembers
+public final class ZLRichLabelStatistics: NSObject {
+    /// 渲染次数（拼装富文本并交给 TTTAttributedLabel）
+    public internal(set) var renders = 0
+    /// 执行规则 handler 的次数（未命中渲染缓存）
+    public internal(set) var handlerCalls = 0
+    /// 直接复用缓存渲染结果的命中数（没有执行 handler，也没有重建 View）
+    public internal(set) var reusedMatches = 0
+    /// 创建 CTFramesetter 的次数（每份新的 attributedText 一次）
+    public internal(set) var framesetterCreations = 0
+    /// `sizeThatFits` / `intrinsicContentSize` 命中缓存的次数
+    public internal(set) var sizeCacheHits = 0
+
+    public func reset() {
+        renders = 0
+        handlerCalls = 0
+        reusedMatches = 0
+        framesetterCreations = 0
+        sizeCacheHits = 0
+    }
+
+    public override var description: String {
+        return "renders: \(renders), handlerCalls: \(handlerCalls), reusedMatches: \(reusedMatches), "
+            + "framesetterCreations: \(framesetterCreations), sizeCacheHits: \(sizeCacheHits)"
+    }
+}
+
 @objcMembers
 open class ZLRichLabel: TTTAttributedLabel {
 
@@ -103,10 +131,10 @@ open class ZLRichLabel: TTTAttributedLabel {
     open var style: HTagTextStyle = [:] { didSet { setNeedsRebuild() } }
 
     /// 可点击内容按下时的默认高亮样式（为空则不高亮），规则可通过 `context.highlightStyle` 单独指定
-    open var highlightStyle: HTagTextStyle = [:] { didSet { setNeedsRebuild() } }
+    open var highlightStyle: HTagTextStyle = [:] { didSet { setNeedsRender() } }
 
     /// 截断时使用的省略符，nil 时使用 "…"（带普通文本样式）
-    open var truncationToken: NSAttributedString? { didSet { setNeedsRebuild() } }
+    open var truncationToken: NSAttributedString? { didSet { setNeedsRender() } }
 
     // MARK: 规则
 
@@ -162,7 +190,9 @@ open class ZLRichLabel: TTTAttributedLabel {
         let view: UIView
         let alignment: HTagWidgetAlignment
         /// 所在位置的字体（用于按对齐方式计算 ascent / descent）
-        let font: UIFont
+        var font: UIFont
+        /// 创建时的字体（Dynamic Type 每次渲染都从它重新缩放，避免复用时重复缩放）
+        let originalFont: UIFont
         /// `HTagWidget.size == .zero`：尺寸由 View 自身计算，内容变化后可重新测量
         let autoSize: Bool
         private(set) var size: CGSize = .zero
@@ -176,6 +206,7 @@ open class ZLRichLabel: TTTAttributedLabel {
             self.view = view
             self.alignment = alignment
             self.font = font
+            self.originalFont = font
             self.autoSize = autoSize
             update(size: size)
         }
@@ -222,6 +253,79 @@ open class ZLRichLabel: TTTAttributedLabel {
     private var batchUpdateDepth = 0
     private var isRebuilding = false
 
+    /// 渲染 / 排版统计（观察缓存效果）
+    public let statistics = ZLRichLabelStatistics()
+
+    /// 单个命中的渲染结果（handler / builder 的输出 + 创建的 View），下次渲染时直接复用
+    private final class RenderedMatch {
+        let rule: TagRichRule
+        let range: NSRange
+        let index: Int
+        let text: String
+        let content: NSAttributedString
+        let onTap: (() -> Void)?
+        let highlightStyle: HTagTextStyle?
+        let attachments: [Attachment]
+
+        init(match: TagRichMatch, content: NSAttributedString, onTap: (() -> Void)?,
+             highlightStyle: HTagTextStyle?, attachments: [Attachment]) {
+            self.rule = match.rule
+            self.range = match.range
+            self.index = match.index
+            self.text = match.text
+            self.content = content
+            self.onTap = onTap
+            self.highlightStyle = highlightStyle
+            self.attachments = attachments
+        }
+
+        /// 同一条规则、同一位置、同一序号、同样的文字才能复用
+        func isValid(for match: TagRichMatch) -> Bool {
+            return rule === match.rule && index == match.index && NSEqualRanges(range, match.range) && text == match.text
+        }
+    }
+
+    private struct RenderKey: Hashable {
+        let location: Int
+        let length: Int
+        let index: Int
+    }
+
+    /// 命中的渲染缓存：文本变化只重新渲染变化的命中；样式等配置变化时按范围作废
+    private var renderCache: [RenderKey: RenderedMatch] = [:]
+
+    /// 排版缓存：同一份 attributedText 只创建一次 CTFramesetter，
+    /// 按「宽度 + 行数」缓存 sizeThatFits 结果，按 textRect 缓存 CTFrame 的行与原点
+    private final class LayoutCache {
+        let text: NSAttributedString
+        let framesetter: CTFramesetter
+        var sizes: [SizeKey: CGSize] = [:]
+        var frameRect: CGRect?
+        var frameLines: [CTLine] = []
+        var frameOrigins: [CGPoint] = []
+
+        init(text: NSAttributedString) {
+            self.text = text
+            self.framesetter = CTFramesetterCreateWithAttributedString(text as CFAttributedString)
+        }
+    }
+
+    private struct SizeKey: Hashable {
+        let width: CGFloat
+        let numberOfLines: Int
+    }
+
+    private var layoutCacheStorage: LayoutCache?
+
+    /// TTTAttributedLabel 的 attributedText 是 copy 后保存的，内容变化时一定是新对象，按对象判断即可
+    private func layoutCache(for text: NSAttributedString) -> LayoutCache {
+        if let cache = layoutCacheStorage, cache.text === text { return cache }
+        let cache = LayoutCache(text: text)
+        statistics.framesetterCreations += 1
+        layoutCacheStorage = cache
+        return cache
+    }
+
     // MARK: Init
 
     public override init(frame: CGRect) {
@@ -256,7 +360,7 @@ open class ZLRichLabel: TTTAttributedLabel {
     open func endUpdates() {
         guard batchUpdateDepth > 0 else { return }
         batchUpdateDepth -= 1
-        if batchUpdateDepth == 0 { rebuild() }
+        if batchUpdateDepth == 0 { render() }
     }
 
     /// Objective-C：`[label update:^(ZLRichLabel *v) { ... }]`
@@ -269,8 +373,86 @@ open class ZLRichLabel: TTTAttributedLabel {
         endUpdates()
     }
 
+    /// 外部设置的字体（rebuild 内部为了基线修正 / Dynamic Type 会改 `font`，不能作为下次渲染的基准）
+    private var configuredFont: UIFont?
+
     open override var font: UIFont! {
-        didSet { setNeedsRebuild() }
+        didSet {
+            if !isRebuilding { configuredFont = font }
+            setNeedsRebuild()
+        }
+    }
+
+    // MARK: 深色模式 / Dynamic Type
+
+    /// 为 true 时按系统「文字大小」设置缩放所有字体（使用 `UIFontMetrics.default`，iOS 11+），
+    /// 系统字号变化时自动重新渲染。已经是 `UIFont.preferredFont(forTextStyle:)` 的字体不会重复缩放
+    /// 自己存储，不交给 UILabel（UILabel 开启后会自行替换 `font`，与这里的渲染冲突）
+    open override var adjustsFontForContentSizeCategory: Bool {
+        get { return adjustsFontForContentSizeCategoryStorage }
+        set {
+            guard newValue != adjustsFontForContentSizeCategoryStorage else { return }
+            adjustsFontForContentSizeCategoryStorage = newValue
+            setNeedsRebuild()
+        }
+    }
+
+    private var adjustsFontForContentSizeCategoryStorage = false
+
+    /// 深色 / 浅色切换、系统字号变化时重新渲染（规则 handler / builder 会重新执行，可在其中按当前外观返回样式）
+    open override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard !rawText.isEmpty else { return }
+        var changed = false
+        if #available(iOS 13.0, *), traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
+            changed = true
+        }
+        if adjustsFontForContentSizeCategory,
+           previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+            changed = true
+        }
+        if changed { setNeedsRebuild() }
+    }
+
+    /// 按当前系统字号缩放字体；未开启 `adjustsFontForContentSizeCategory` 或已是 Dynamic Type 字体时原样返回
+    public func scaledFont(_ font: UIFont) -> UIFont {
+        guard adjustsFontForContentSizeCategory, !ZLRichLabel.isDynamicTypeFont(font) else { return font }
+        if #available(iOS 11.0, *) {
+            return UIFontMetrics.default.scaledFont(for: font, compatibleWith: traitCollection)
+        }
+        return font
+    }
+
+    /// 是否为 `UIFont.preferredFont(forTextStyle:)` 创建的字体。
+    /// 注意 `systemFont(ofSize:)` 的描述符同样带 `.textStyle`（值为 `CTFontRegularUsage` 等），需要按值区分
+    private static func isDynamicTypeFont(_ font: UIFont) -> Bool {
+        guard let style = font.fontDescriptor.object(forKey: .textStyle) as? String else { return false }
+        return style.hasPrefix("UICTFontTextStyle")
+    }
+
+    /// 缩放富文本中的所有字体，并按缩放后的字体更新自定义 View 的对齐
+    private func applyContentSizeScaling(to result: NSMutableAttributedString, includesAttachments: Bool = true) {
+        var cache: [UIFont: UIFont] = [:]
+        let scale: (UIFont) -> UIFont = { font in
+            if let scaled = cache[font] { return scaled }
+            let scaled = self.scaledFont(font)
+            cache[font] = scaled
+            return scaled
+        }
+        if adjustsFontForContentSizeCategory {
+            let full = NSRange(location: 0, length: result.length)
+            result.enumerateAttribute(.font, in: full, options: []) { value, range, _ in
+                if let font = value as? UIFont { result.addAttribute(.font, value: scale(font), range: range) }
+            }
+        }
+        guard includesAttachments, !attachments.isEmpty else { return }
+        // 复用的 View 也要按当前设置重新计算对齐（未开启时 scale 原样返回）
+        for attachment in attachments.values {
+            attachment.font = scale(attachment.originalFont)
+            attachment.update(size: attachment.size)
+        }
+        // 缓存中的占位符带的是旧尺寸的 CTRunDelegate，统一按当前尺寸替换
+        replaceRunDelegates(in: result, ids: nil)
     }
 
     open override var textColor: UIColor! {
@@ -283,7 +465,7 @@ open class ZLRichLabel: TTTAttributedLabel {
     public final func setNeedsReparse() {
         guard !isPassingThrough else { return }
         parse()
-        setNeedsRebuild()
+        setNeedsRender()
     }
 
     private func parse() {
@@ -311,28 +493,57 @@ open class ZLRichLabel: TTTAttributedLabel {
 
     // MARK: Build
 
-    /// 配置变化后重新渲染（批量更新中会推迟到 `endUpdates()`）
+    /// 配置变化后重新渲染：清空渲染缓存，所有命中重新执行 handler（批量更新中会推迟到 `endUpdates()`）
     public final func setNeedsRebuild() {
+        guard !isRebuilding else { return }
+        renderCache.removeAll()
+        setNeedsRender()
+    }
+
+    /// 只作废某条规则的渲染缓存并重新渲染：其他规则的命中直接复用上次结果（不执行 handler、不重建 View）。
+    /// 子类中只影响内置规则的配置变化时使用（例如 `ZLTagRichLabel.tagStyle`）；
+    /// 外部规则 handler 依赖的数据变化后也可以调用它代替 `rebuild()`
+    @objc(setNeedsRebuildForRuleNamed:)
+    public final func setNeedsRebuild(forRuleNamed name: String) {
+        guard !isRebuilding else { return }
+        invalidateRenderCache(forRuleNamed: name)
+        setNeedsRender()
+    }
+
+    /// 只作废某条规则的渲染缓存，不触发渲染（子类在 `didParse()` 中使用）
+    func invalidateRenderCache(forRuleNamed name: String) {
+        renderCache = renderCache.filter { $0.value.rule.name != name }
+    }
+
+    /// 重新渲染并复用缓存：用于不影响 handler 输出的配置（按下高亮、省略符）和重新解析后
+    private func setNeedsRender() {
         guard batchUpdateDepth == 0, !isRebuilding else { return }
-        rebuild()
+        render()
     }
 
     /// 普通文本样式：label 的 font / textColor + `style`
     public var resolvedBaseStyle: HTagTextStyle {
         var baseStyle: HTagTextStyle = [:]
-        if let font = font { baseStyle[.font] = font }
+        if let font = configuredFont ?? font { baseStyle[.font] = font }
         if let color = textColor { baseStyle[.foregroundColor] = color }
         baseStyle.merge(style) { $1 }
         return baseStyle
     }
 
-    /// 重新构建富文本
+    /// 强制重新渲染：清空渲染缓存，所有规则 handler / builder 都会重新执行。
+    /// handler / builder 依赖的外部数据变化后调用；只影响某条规则时可用 `setNeedsRebuild(forRuleNamed:)`
     open func rebuild() {
+        guard !isRebuilding else { return }
+        renderCache.removeAll()
+        render()
+    }
+
+    /// 渲染：命中的结果优先从缓存复用，只对缓存中没有的命中执行 handler
+    private func render() {
         guard !isRebuilding else { return }
         isRebuilding = true
         defer { isRebuilding = false }
-
-        removeAttachmentViews()
+        statistics.renders += 1
 
         let baseStyle = resolvedBaseStyle
         // TTTAttributedLabel 绘制时用 label.font 的 descender 修正基线，保持与正文字体一致
@@ -340,46 +551,61 @@ open class ZLRichLabel: TTTAttributedLabel {
             font = baseFont
         }
 
+        let previousAttachments = attachments
         let result = NSMutableAttributedString()
         /// (范围, 按下高亮样式, 点击)
         var linkItems: [(NSRange, HTagTextStyle?, () -> Void)] = []
+        var nextCache: [RenderKey: RenderedMatch] = [:]
+        var live: [Int: Attachment] = [:]
 
         for seg in segments {
             guard let match = seg.match else {
                 result.append(NSAttributedString(string: seg.text, attributes: baseStyle))
                 continue
             }
-
-            // handler 中通过 context.attachmentString(for:) 创建的 View，onTap 确定后再统一加点击
-            var pending: [(Attachment, Bool)] = []
-            let context = TagRichRuleContext(match: match, baseStyle: baseStyle) { [unowned self] widget, style in
-                let attachment = self.makeAttachment(widget: widget, style: style)
-                pending.append((attachment, widget.tappable))
-                return self.makeAttachmentString(attachment, style: style)
+            let key = RenderKey(location: match.range.location, length: match.range.length, index: match.index)
+            let rendered: RenderedMatch
+            if let cached = renderCache[key], cached.isValid(for: match) {
+                rendered = cached
+                statistics.reusedMatches += 1
+            } else {
+                rendered = renderMatch(match, baseStyle: baseStyle)
+                statistics.handlerCalls += 1
             }
-            match.rule.handler(context)
-            context.attachmentFactory = nil
+            nextCache[key] = rendered
+            rendered.attachments.forEach { live[$0.id] = $0 }
 
-            let onTap = context.onTap
-            if let onTap = onTap {
-                for (attachment, tappable) in pending where tappable {
-                    addTap(to: attachment.view, action: onTap)
-                }
-            }
-            // TTTAttributedLabel 不绘制 NSTextAttachment，这里转换成 View 承载
-            let custom = convertTextAttachments(in: context.attributedString, style: baseStyle, tapAction: onTap)
-            let range = NSRange(location: result.length, length: custom.length)
-            result.append(custom)
-            if let onTap = onTap, range.length > 0 {
-                linkItems.append((range, context.highlightStyle, onTap))
+            let range = NSRange(location: result.length, length: rendered.content.length)
+            result.append(rendered.content)
+            if let onTap = rendered.onTap, range.length > 0 {
+                linkItems.append((range, rendered.highlightStyle, onTap))
             }
         }
+        renderCache = nextCache
+
+        // 移除不再使用的 View（同一个 View 可能被新的命中复用，不能误删）
+        let liveViews = Set(live.values.map { ObjectIdentifier($0.view) })
+        for (id, attachment) in previousAttachments
+            where live[id] == nil && !liveViews.contains(ObjectIdentifier(attachment.view)) {
+            attachment.view.removeFromSuperview()
+        }
+        attachments = live
 
         // 根据最终渲染内容判断书写方向（与 CoreText 的自然段落方向一致；占位符 U+FFFC 为中性字符）
         isRightToLeft = ZLRichLabel.detectRightToLeft(result.string)
             ?? (effectiveUserInterfaceLayoutDirection == .rightToLeft)
 
-        attributedTruncationToken = truncationToken ?? NSAttributedString(string: "\u{2026}", attributes: baseStyle)
+        // Dynamic Type：缩放所有字体（含 label.font，TTT 用它修正基线）
+        applyContentSizeScaling(to: result)
+        if let baseFont = baseStyle[.font] as? UIFont {
+            let scaled = scaledFont(baseFont)
+            if scaled != font { font = scaled }
+        }
+
+        let token = NSMutableAttributedString(
+            attributedString: truncationToken ?? NSAttributedString(string: "\u{2026}", attributes: baseStyle))
+        applyContentSizeScaling(to: token, includesAttachments: false)
+        attributedTruncationToken = token
         activeLinkAttributes = highlightStyle.isEmpty ? [:] : highlightStyle
 
         setText(result)
@@ -410,7 +636,37 @@ open class ZLRichLabel: TTTAttributedLabel {
     private func removeAttachmentViews() {
         attachments.values.forEach { $0.view.removeFromSuperview() }
         attachments.removeAll()
-        nextAttachmentId = 0
+        renderCache.removeAll()
+    }
+
+    /// 执行规则 handler，生成单个命中的渲染结果
+    private func renderMatch(_ match: TagRichMatch, baseStyle: HTagTextStyle) -> RenderedMatch {
+        // 本次创建的 View 的 id 都 >= firstId（id 只增不减，复用的 View 不会冲突）
+        let firstId = nextAttachmentId
+        // handler 中通过 context.attachmentString(for:) 创建的 View，onTap 确定后再统一加点击
+        var pending: [(Attachment, Bool)] = []
+        let context = TagRichRuleContext(match: match, baseStyle: baseStyle) { [unowned self] widget, style in
+            let attachment = self.makeAttachment(widget: widget, style: style)
+            pending.append((attachment, widget.tappable))
+            return self.makeAttachmentString(attachment, style: style)
+        }
+        match.rule.handler(context)
+        context.attachmentFactory = nil
+
+        let onTap = context.onTap
+        if let onTap = onTap {
+            for (attachment, tappable) in pending where tappable {
+                addTap(to: attachment.view, action: onTap)
+            }
+        }
+        // TTTAttributedLabel 不绘制 NSTextAttachment，这里转换成 View 承载
+        let content = convertTextAttachments(in: context.attributedString, style: baseStyle, tapAction: onTap)
+        let created = attachments.values.filter { $0.id >= firstId }.sorted { $0.id < $1.id }
+        return RenderedMatch(match: match,
+                             content: NSAttributedString(attributedString: content),
+                             onTap: onTap,
+                             highlightStyle: context.highlightStyle,
+                             attachments: created)
     }
 
     /// 计算 View 的尺寸：systemLayoutSizeFitting → sizeThatFits → bounds
@@ -526,6 +782,16 @@ open class ZLRichLabel: TTTAttributedLabel {
         return changes
     }
 
+    /// 按 Attachment 当前尺寸重新生成占位符的 CTRunDelegate（ids 为 nil 时处理全部）
+    private func replaceRunDelegates(in string: NSMutableAttributedString, ids: Set<Int>?) {
+        string.enumerateAttribute(ZLRichLabel.attachmentKey,
+                                  in: NSRange(location: 0, length: string.length), options: []) { value, range, _ in
+            guard let id = value as? Int, ids?.contains(id) ?? true,
+                  let attachment = attachments[id], let delegate = makeRunDelegate(attachment) else { return }
+            string.addAttribute(ZLRichLabel.runDelegateKey, value: delegate, range: range)
+        }
+    }
+
     /// 更新占位尺寸：只替换对应占位符的 CTRunDelegate，链接与其他内容不变
     private func applyAttachmentSizes(_ sizes: [Int: CGSize]) {
         var changed = Set<Int>()
@@ -542,12 +808,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         }
 
         let mutable = NSMutableAttributedString(attributedString: attr)
-        mutable.enumerateAttribute(ZLRichLabel.attachmentKey,
-                                   in: NSRange(location: 0, length: mutable.length), options: []) { value, range, _ in
-            guard let id = value as? Int, changed.contains(id),
-                  let attachment = attachments[id], let delegate = makeRunDelegate(attachment) else { return }
-            mutable.addAttribute(ZLRichLabel.runDelegateKey, value: delegate, range: range)
-        }
+        replaceRunDelegates(in: mutable, ids: changed)
         // TTTAttributedLabel.setAttributedText 会重建 framesetter，且不会清空已添加的链接
         attributedText = mutable
 
@@ -621,7 +882,13 @@ open class ZLRichLabel: TTTAttributedLabel {
         var width = size.width - horizontalInsets
         if width <= 0 { width = maxValue }
 
-        let framesetter = CTFramesetterCreateWithAttributedString(attr as CFAttributedString)
+        let cache = layoutCache(for: attr)
+        let key = SizeKey(width: width, numberOfLines: numberOfLines)
+        if let cached = cache.sizes[key] {
+            statistics.sizeCacheHits += 1
+            return CGSize(width: cached.width + horizontalInsets, height: cached.height + verticalInsets)
+        }
+        let framesetter = cache.framesetter
         var range = CFRange(location: 0, length: attr.length)
         var constraints = CGSize(width: width, height: maxValue)
 
@@ -639,8 +906,9 @@ open class ZLRichLabel: TTTAttributedLabel {
         }
 
         let suggested = CTFramesetterSuggestFrameSizeWithConstraints(framesetter, range, nil, constraints, nil)
-        return CGSize(width: ceil(suggested.width) + horizontalInsets,
-                      height: ceil(suggested.height) + verticalInsets)
+        let fitted = CGSize(width: ceil(suggested.width), height: ceil(suggested.height))
+        cache.sizes[key] = fitted
+        return CGSize(width: fitted.width + horizontalInsets, height: fitted.height + verticalInsets)
     }
 
     /// 支持 Auto Layout 自适应高度：宽度由约束决定，高度根据内容计算
@@ -723,14 +991,24 @@ open class ZLRichLabel: TTTAttributedLabel {
               bounds.width > 0, bounds.height > 0 else { return }
 
         let textRect = self.textRect(forBounds: bounds, limitedToNumberOfLines: numberOfLines)
-        let framesetter = CTFramesetterCreateWithAttributedString(attr as CFAttributedString)
-        let path = CGPath(rect: textRect, transform: nil)
-        let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: attr.length), path, nil)
-        guard let lines = CTFrameGetLines(frame) as? [CTLine], !lines.isEmpty else { return }
+        let cache = layoutCache(for: attr)
+        if cache.frameRect != textRect {
+            let path = CGPath(rect: textRect, transform: nil)
+            let frame = CTFramesetterCreateFrame(cache.framesetter, CFRange(location: 0, length: attr.length), path, nil)
+            let allLines = (CTFrameGetLines(frame) as? [CTLine]) ?? []
+            var allOrigins = [CGPoint](repeating: .zero, count: allLines.count)
+            if !allLines.isEmpty {
+                CTFrameGetLineOrigins(frame, CFRange(location: 0, length: allLines.count), &allOrigins)
+            }
+            cache.frameRect = textRect
+            cache.frameLines = allLines
+            cache.frameOrigins = allOrigins
+        }
+        let lines = cache.frameLines
+        let origins = cache.frameOrigins
+        guard !lines.isEmpty else { return }
 
         let count = numberOfLines > 0 ? min(numberOfLines, lines.count) : lines.count
-        var origins = [CGPoint](repeating: .zero, count: count)
-        CTFrameGetLineOrigins(frame, CFRange(location: 0, length: count), &origins)
 
         let truncateLastLine = lineBreakMode == .byTruncatingHead
             || lineBreakMode == .byTruncatingMiddle

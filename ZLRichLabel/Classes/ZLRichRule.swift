@@ -31,8 +31,10 @@ public final class TagRichRule: NSObject {
     public let regex: NSRegularExpression
     /// 优先级，数值越大越优先
     public let priority: Int
-    /// 命中后的处理：在 `context.attributedString` 上修改 / 替换要展示的内容，设置点击与高亮
-    /// 注意：每次重新渲染（修改样式、文字等）都会重新调用
+    /// 命中后的处理：在 `context.attributedString` 上修改 / 替换要展示的内容，设置点击与高亮。
+    /// 结果会按命中缓存：修改 `style` / font / textColor、深色模式或字号变化、`rebuild()` 时重新调用；
+    /// 只修改按下高亮 / 省略符，或文字变化但该命中的位置与内容不变时直接复用上次结果。
+    /// handler 依赖的外部数据变化后，请调用 `rebuild()` 或 `setNeedsRebuild(forRuleNamed:)`
     public let handler: (TagRichRuleContext) -> Void
 
     public init(name: String, regex: NSRegularExpression, priority: Int = 0,
@@ -208,11 +210,20 @@ public final class TagRichParser: NSObject {
             if a.range.length != b.range.length { return a.range.length > b.range.length }
             return a.order < b.order
         }
+        // 已接受的命中互不重叠且按位置有序：二分找到插入位置后，只需检查前后相邻的两个是否重叠
         var accepted: [Candidate] = []
-        for c in candidates where !accepted.contains(where: { NSIntersectionRange($0.range, c.range).length > 0 }) {
-            accepted.append(c)
+        accepted.reserveCapacity(candidates.count)
+        for c in candidates {
+            var low = 0
+            var high = accepted.count
+            while low < high {
+                let mid = (low + high) / 2
+                if accepted[mid].range.location < c.range.location { low = mid + 1 } else { high = mid }
+            }
+            if low > 0, NSMaxRange(accepted[low - 1].range) > c.range.location { continue }
+            if low < accepted.count, accepted[low].range.location < NSMaxRange(c.range) { continue }
+            accepted.insert(c, at: low)
         }
-        accepted.sort { $0.range.location < $1.range.location }
 
         return accepted.enumerated().map { i, c in
             TagRichMatch(rule: c.rule, index: i, result: c.result, source: source)

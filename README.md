@@ -40,12 +40,14 @@ Swift 与 Objective-C 均可使用，基于 [TTTAttributedLabel](https://github.
 - `<h>` 标签：`<h>`、`<h1>`…`<hN>`，`</h1>` 和 `<h1/>` 两种闭合写法，不区分大小写；按标签名区分样式与点击；可替换为自定义 View
 - 容错：开闭不匹配、未闭合的标签原样显示，不影响后面的标签
 - 多行截断（自定义省略符）、Auto Layout 自适应高度
+- 渲染缓存 + 排版缓存：改样式 / 追加文字时只重新处理变化的部分
 - RTL：阿拉伯语 / 希伯来语等从右到左文本自动右对齐，支持双向混排
+- 深色模式自动重新渲染；可选支持 Dynamic Type（系统文字大小）
 - Objective-C 可用
 
 ## 环境要求
 
-- iOS 10.0+（见 podspec；Example 工程使用 iOS 15.0）
+- iOS 13.0+（见 podspec；Example 工程使用 iOS 15.0）
 - Swift 5.0
 - 依赖 `TTTAttributedLabel`
 
@@ -134,7 +136,7 @@ label.removeRule(named: "topic")
 label.removeAllRules()             // 只移除外部规则，不影响子类内置规则
 ```
 
-规则 handler 在**每次渲染时**都会调用（修改样式、文字、`rebuild()` 等），不要在里面做耗时操作。
+handler 的结果会按命中缓存（见 [性能与缓存](#性能与缓存)）：修改 `style` / font / textColor、深色模式或字号变化、调用 `rebuild()` 时重新执行；只改按下高亮 / 省略符，或文字变化但该命中的位置和内容没变时直接复用。**handler 依赖的外部数据变化后，请调用 `rebuild()` 或 `setNeedsRebuild(forRuleNamed:)`**。
 
 ### TagRichRuleContext
 
@@ -338,9 +340,15 @@ HTagParser.tags("<h1>a</h1>")        // 独立解析，不创建 label
 | `truncationToken` | 截断省略符，默认带普通文本样式的 `…` |
 | `numberOfLines` / `lineBreakMode` | 多行与截断 |
 | `update { }` / `beginUpdates()` / `endUpdates()` | 批量修改，只渲染一次 |
-| `rebuild()` | 强制重新渲染（如外部状态变化后需要重新调用 builder / handler） |
+| `rebuild()` | 强制重新渲染：清空渲染缓存，所有 builder / handler 重新执行（外部状态变化后调用） |
+| `setNeedsRebuild(forRuleNamed:)` | 只让某条规则重新执行 handler，其他命中直接复用 |
+| `statistics` | 渲染 / 排版统计（handler 执行次数、复用次数、framesetter 创建次数等），调试缓存用 |
 | `invalidateAttachmentLayout()` / `invalidateLayout(forAttachmentView:)` | 自定义 View 尺寸 / 内容变化后刷新排版（不重新执行 builder / handler） |
 | `isRightToLeft` | 当前内容是否为 RTL |
+| `adjustsFontForContentSizeCategory` | 默认 `false`。开启后按系统「文字大小」缩放所有字体（正文、规则 / 标签内容、自定义 View 的对齐），系统字号变化时自动重新渲染；`UIFont.preferredFont(forTextStyle:)` 创建的字体不会重复缩放 |
+| `scaledFont(_:)` | 按当前系统字号缩放一个字体（未开启上面的开关时原样返回），可在 handler / builder 中给自定义 View 用 |
+
+深色模式：浅色 / 深色切换时 label 会自动重新渲染，规则 handler 和 builder 会重新执行。使用动态颜色（如 `.label`、`UIColor { trait in ... }`）即可自动适配；需要按外观返回不同内容时，在 handler 中读取 `label.traitCollection.userInterfaceStyle`。
 
 布局：
 
@@ -349,6 +357,31 @@ HTagParser.tags("<h1>a</h1>")        // 独立解析，不创建 label
 - RTL：`textAlignment` 为 `.natural`（默认）时，按内容的第一个强方向字符自动左 / 右对齐
 
 xib / storyboard 中设置的文字同样会被解析。
+
+## 性能与缓存
+
+**渲染缓存**：每个命中的渲染结果（handler / builder 的输出、创建的自定义 View、点击）都会缓存，下次渲染时直接复用，不执行 handler、不重建 View。
+
+| 操作 | 重新执行 handler 的范围 |
+| --- | --- |
+| `highlightStyle`、`truncationToken` | 不执行，全部复用 |
+| 修改文字（`text` / `rawText`） | 只有位置、序号或内容变化的命中（例如在末尾追加时，前面的全部复用） |
+| 增删规则 | 只有受影响的命中 |
+| `ZLTagRichLabel` 的标签配置（`tagStyle`、`tagStyles`、`tagWidgetBuilder`、`onTagTap` 等） | 只有 `<h>` 标签，自定义规则复用 |
+| `setNeedsRebuild(forRuleNamed:)` | 只有这条规则 |
+| `style`、`font`、`textColor`、深色模式 / 字号变化、`rebuild()` | 全部 |
+
+**排版缓存**：同一份内容只创建一次 `CTFramesetter`；`sizeThatFits` / `intrinsicContentSize` 按「宽度 + 行数」缓存结果，自定义 View 的定位按文本区域缓存行信息。内容或尺寸变化时自动失效。
+
+**解析**：多条规则重叠时的取舍为 O(n log n)，上万个命中也能很快完成。
+
+```swift
+label.statistics.reset()
+label.highlightStyle = [.backgroundColor: UIColor.yellow]
+print(label.statistics)   // renders: 1, handlerCalls: 0, reusedMatches: 600, ...
+```
+
+自己写子类时：只影响内置规则渲染的配置用 `setNeedsRebuild(forRuleNamed:)`，影响所有内容的用 `setNeedsRebuild()`。
 
 ## 继承 ZLRichLabel 实现自己的规则组件
 
@@ -426,6 +459,7 @@ label.numberOfLines = 0;
 | `TagRichParser.resolve(_:rules:)` | `[TagRichParser matchesInString:rules:]` |
 | `view.zl_setNeedsRichLabelLayout()` | `[view zl_setNeedsRichLabelLayout]` |
 | `invalidateLayout(forAttachmentView:)` | `invalidateLayoutForAttachmentView:` |
+| `setNeedsRebuild(forRuleNamed:)` | `setNeedsRebuildForRuleNamed:` |
 
 ## Example
 
@@ -445,6 +479,8 @@ open ZLRichLabel.xcworkspace
 | 17、18、20 | `ZLRichLabel` 自定义规则：@提及 / #话题# / 链接、表情图片 / 模板变量、简易 Markdown |
 | 19 | `ZLTagRichLabel`：`<h>` 标签与自定义规则的优先级 |
 | 21 | 自定义 View 尺寸变化自动刷新排版：点击色块改 frame 变宽、点赞计数文字变化 |
+| 22 | 深色模式 / Dynamic Type：切换预览区域的外观与文字大小，文字、标签、规则内容和自定义 View 一起变化 |
+| 23 | 性能：600 个命中（含 200 张图片）的 label，对比改高亮 / 追加文字 / 只刷新一条规则 / `rebuild()` 的耗时与 handler 执行次数，`sizeThatFits` 缓存，1.5 万命中的解析耗时 |
 
 页面顶部会显示最近一次点击得到的完整信息，底部有点击历史。
 

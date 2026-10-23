@@ -172,20 +172,20 @@ open class ZLTagRichLabel: ZLRichLabel {
     // MARK: 标签样式
 
     /// 所有标签的默认样式（会 merge 到 style 上）
-    open var tagStyle: HTagTextStyle = [:] { didSet { setNeedsRebuild() } }
+    open var tagStyle: HTagTextStyle = [:] { didSet { setNeedsTagRebuild() } }
 
     /// 按标签名区分的样式，key 为小写标签名（`"h"`、`"h1"`、`"h2"` …），会 merge 到 tagStyle 上
-    open var tagStyles: [String: HTagTextStyle] = [:] { didSet { setNeedsRebuild() } }
+    open var tagStyles: [String: HTagTextStyle] = [:] { didSet { setNeedsTagRebuild() } }
 
     /// 针对单个标签的样式（最后 merge，优先级最高），可根据 index / name / level / text 区分
-    open var tagStyleBuilder: HTagStyleBuilder? { didSet { setNeedsRebuild() } }
+    open var tagStyleBuilder: HTagStyleBuilder? { didSet { setNeedsTagRebuild() } }
 
     /// 完全自定义标签富文本，返回 nil 则使用默认样式
-    open var tagSpanBuilder: HTagSpanBuilder? { didSet { setNeedsRebuild() } }
+    open var tagSpanBuilder: HTagSpanBuilder? { didSet { setNeedsTagRebuild() } }
 
     /// 可选：根据解析内容自定义 View（替换文字 / 放在文字前 / 放在文字后）
     /// 返回 nil 则使用默认文字。优先级：tagSpanBuilder > tagWidgetBuilder > 默认
-    open var tagWidgetBuilder: HTagWidgetBuilder? { didSet { setNeedsRebuild() } }
+    open var tagWidgetBuilder: HTagWidgetBuilder? { didSet { setNeedsTagRebuild() } }
 
     /// 标签按下时的高亮样式（为空则不高亮），等同于基类的 `highlightStyle`（同时作用于自定义规则）
     open var tagHighlightStyle: HTagTextStyle {
@@ -194,13 +194,13 @@ open class ZLTagRichLabel: ZLRichLabel {
     }
 
     /// 按标签名区分的按下高亮样式，优先于 `tagHighlightStyle`；设为 `[:]` 可让某类标签不高亮
-    open var tagHighlightStyles: [String: HTagTextStyle] = [:] { didSet { setNeedsRebuild() } }
+    open var tagHighlightStyles: [String: HTagTextStyle] = [:] { didSet { setNeedsTagRebuild() } }
 
     // MARK: 点击
 
     /// 按标签名区分的点击回调，key 为小写标签名（`"h"`、`"h1"` …）
     /// 某个标签名有对应 handler 时只回调该 handler，否则回调 `onTagTap`
-    @nonobjc open var tagTapHandlers: [String: HTagTapCallback] = [:] { didSet { setNeedsRebuild() } }
+    @nonobjc open var tagTapHandlers: [String: HTagTapCallback] = [:] { didSet { setNeedsTagRebuild() } }
 
     /// 设置某个标签名的点击回调（传 nil 移除），等价于修改 `tagTapHandlers`
     /// Objective-C：`[label setTapHandler:^(HTagInfo *info) {...} forTag:@"h1"]`
@@ -217,7 +217,7 @@ open class ZLTagRichLabel: ZLRichLabel {
 
     /// 标签点击（兜底）：标签名在 `tagTapHandlers` 中没有对应 handler 时回调
     /// `onTagTap` 和 `tagTapHandlers` 都没有处理的标签不可点击
-    open var onTagTap: HTagTapCallback? { didSet { setNeedsRebuild() } }
+    open var onTagTap: HTagTapCallback? { didSet { setNeedsTagRebuild() } }
 
     /// 解析完成后把所有标签信息回调给外部（文本或规则变化时回调）
     open var onParsed: (([HTagInfo]) -> Void)?
@@ -274,6 +274,11 @@ open class ZLTagRichLabel: ZLRichLabel {
         return super.builtInRules + (parsesHTags ? [hTagRule] : [])
     }
 
+    /// 标签相关配置变化：只重新渲染 `<h>` 标签，自定义规则的命中直接复用缓存（不执行 handler、不重建 View）
+    private func setNeedsTagRebuild() {
+        setNeedsRebuild(forRuleNamed: ZLTagRichLabel.hTagRuleName)
+    }
+
     private func isHTagMatch(_ match: TagRichMatch) -> Bool {
         return match.rule === hTagRuleCache
     }
@@ -286,6 +291,10 @@ open class ZLTagRichLabel: ZLRichLabel {
             let info = HTagParser.info(from: match.result, in: match.source as NSString, index: infos.count)
             infos.append(info)
             byLocation[match.range.location] = info
+        }
+        // 标签序号变了（前面的标签增删）时，缓存的渲染结果里的 HTagInfo 已过期
+        if tagInfoByLocation.contains(where: { old in byLocation[old.key].map { $0.index != old.value.index } ?? false }) {
+            invalidateRenderCache(forRuleNamed: ZLTagRichLabel.hTagRuleName)
         }
         tags = infos
         tagInfoByLocation = byLocation
