@@ -1,0 +1,1105 @@
+//
+//  OCDemoViewController.m
+//  ZLRichLabel_Example
+//
+//  Objective-C 版演示页面：与 HTagDemoPage.swift 的 20 个用例一一对应
+//
+
+#import <UIKit/UIKit.h>
+@import ZLRichLabel;
+@import TTTAttributedLabel;
+
+#pragma mark - 颜色
+
+static UIColor *OCHex(uint32_t hex) {
+    return [UIColor colorWithRed:((hex >> 16) & 0xFF) / 255.0
+                           green:((hex >> 8) & 0xFF) / 255.0
+                            blue:(hex & 0xFF) / 255.0
+                           alpha:1];
+}
+
+#define kBlue       OCHex(0x2196F3)
+#define kDeepOrange OCHex(0xFF5722)
+#define kRed        OCHex(0xF44336)
+#define kGreen      OCHex(0x4CAF50)
+#define kPurple     OCHex(0x9C27B0)
+#define kDeepPurple OCHex(0x673AB7)
+#define kOrange     OCHex(0xFF9800)
+#define kGrey       OCHex(0x9E9E9E)
+#define kTeal       OCHex(0x009688)
+#define kPink       OCHex(0xE91E63)
+#define kIndigo     OCHex(0x3F51B5)
+#define kBrown      OCHex(0x795548)
+#define kAmber      OCHex(0xFFC107)
+
+static NSString *OCQuote(NSString *s) {
+    return s ? [NSString stringWithFormat:@"\"%@\"", s] : @"null";
+}
+
+#pragma mark - 数据
+
+@interface OCTapRecord : NSObject
+@property (nonatomic, copy) NSString *caseName;
+@property (nonatomic, strong) HTagInfo *info;
+/// 触发的点击动作（tagTapHandlers 按标签名分发的结果）
+@property (nonatomic, copy) NSString *action;
+@property (nonatomic, strong) NSDate *time;
+@end
+
+@implementation OCTapRecord
+@end
+
+#pragma mark - 带内边距的 UILabel
+
+@interface OCPaddingLabel : UILabel
+@property (nonatomic, assign) UIEdgeInsets insets;
+- (instancetype)initWithInsets:(UIEdgeInsets)insets;
+@end
+
+@implementation OCPaddingLabel
+
+- (instancetype)initWithInsets:(UIEdgeInsets)insets {
+    if (self = [super initWithFrame:CGRectZero]) {
+        _insets = insets;
+        self.textAlignment = NSTextAlignmentCenter;
+    }
+    return self;
+}
+
+- (void)drawTextInRect:(CGRect)rect {
+    [super drawTextInRect:UIEdgeInsetsInsetRect(rect, self.insets)];
+}
+
+- (CGSize)intrinsicContentSize {
+    CGSize size = [super intrinsicContentSize];
+    return CGSizeMake(ceil(size.width + self.insets.left + self.insets.right),
+                      ceil(size.height + self.insets.top + self.insets.bottom));
+}
+
+@end
+
+#pragma mark - 自定义 Widget
+
+@interface OCDemoWidgets : NSObject
+@end
+
+@implementation OCDemoWidgets
+
+/// 按钮样式（替换文字）
++ (HTagWidget *)button:(NSString *)title {
+    OCPaddingLabel *button = [[OCPaddingLabel alloc] initWithInsets:UIEdgeInsetsMake(2, 10, 2, 10)];
+    button.text = title;
+    button.font = [UIFont systemFontOfSize:12];
+    button.textColor = UIColor.whiteColor;
+    button.backgroundColor = kBlue;
+    button.layer.cornerRadius = 12;
+    button.layer.masksToBounds = YES;
+    return [[HTagWidget alloc] initWithView:button
+                                       size:button.intrinsicContentSize
+                                   position:HTagWidgetPositionReplace
+                                  alignment:HTagWidgetAlignmentMiddle
+                                   tappable:YES];
+}
+
+/// 红点（与文字间距 4）
++ (HTagWidget *)redDot:(HTagWidgetPosition)position {
+    UIView *container = [UIView new];
+    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(2, 0, 8, 8)];
+    dot.backgroundColor = kRed;
+    dot.layer.cornerRadius = 4;
+    [container addSubview:dot];
+    return [HTagWidget widgetWithView:container size:CGSizeMake(12, 8) position:position];
+}
+
+/// VIP 徽章（与文字间距 4）
++ (HTagWidget *)vipBadge:(HTagWidgetPosition)position {
+    OCPaddingLabel *badge = [[OCPaddingLabel alloc] initWithInsets:UIEdgeInsetsMake(0, 4, 0, 4)];
+    badge.text = @"VIP";
+    badge.font = [UIFont boldSystemFontOfSize:10];
+    badge.textColor = UIColor.whiteColor;
+    badge.backgroundColor = kAmber;
+    badge.layer.cornerRadius = 4;
+    badge.layer.masksToBounds = YES;
+    CGSize size = badge.intrinsicContentSize;
+    badge.frame = CGRectMake(2, 0, size.width, size.height);
+    UIView *container = [UIView new];
+    [container addSubview:badge];
+    return [HTagWidget widgetWithView:container size:CGSizeMake(size.width + 4, size.height) position:position];
+}
+
+/// 勾选框（自己处理点击，不触发 onTagTap）
++ (HTagWidget *)checkbox:(BOOL)checked target:(id)target action:(SEL)action {
+    UIView *container = [UIView new];
+    UIImageView *icon = [[UIImageView alloc] initWithFrame:CGRectMake(2, 0, 18, 18)];
+    icon.image = [UIImage systemImageNamed:checked ? @"checkmark.circle.fill" : @"circle"];
+    icon.tintColor = checked ? kGreen : kGrey;
+    [container addSubview:icon];
+    [container addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:target action:action]];
+    return [[HTagWidget alloc] initWithView:container
+                                       size:CGSizeMake(22, 18)
+                                   position:HTagWidgetPositionReplace
+                                  alignment:HTagWidgetAlignmentMiddle
+                                   tappable:NO];
+}
+
+/// 图标 + 文字（tagSpanBuilder 使用，NSTextAttachment 会被组件自动转换为可点击的 View）
++ (NSAttributedString *)iconText:(NSString *)symbol text:(NSString *)text style:(NSDictionary *)style {
+    UIImage *image = [[UIImage systemImageNamed:symbol] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    if (!image) { return nil; }
+    NSTextAttachment *attachment = [NSTextAttachment new];
+    attachment.image = image;
+    attachment.bounds = CGRectMake(0, 0, 16, 16);
+    NSMutableAttributedString *result =
+        [[NSAttributedString attributedStringWithAttachment:attachment] mutableCopy];
+    [result addAttributes:style range:NSMakeRange(0, result.length)];
+    [result appendAttributedString:[[NSAttributedString alloc] initWithString:text attributes:style]];
+    return result;
+}
+
+@end
+
+#pragma mark - HTagInfo 表格
+
+@interface OCInfoTable : NSObject
+@end
+
+@implementation OCInfoTable
+
+/// HTagInfo 所有字段的表格展示（等宽字体对齐）
++ (NSAttributedString *)make:(HTagInfo *)info {
+    NSArray<NSArray<NSString *> *> *rows = @[
+        @[@"index", [NSString stringWithFormat:@"%ld", (long)info.index]],
+        @[@"name", OCQuote(info.name)],
+        @[@"level", info.level ? info.level.stringValue : @"null"],
+        @[@"text", OCQuote(info.text)],
+        @[@"raw", OCQuote(info.raw)],
+    ];
+    NSUInteger keyWidth = 0;
+    for (NSArray *row in rows) { keyWidth = MAX(keyWidth, [row[0] length]); }
+    keyWidth += 2;
+
+    UIFont *font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
+    NSMutableAttributedString *result = [NSMutableAttributedString new];
+    [rows enumerateObjectsUsingBlock:^(NSArray<NSString *> *row, NSUInteger i, BOOL *stop) {
+        NSString *key = [row[0] stringByPaddingToLength:keyWidth withString:@" " startingAtIndex:0];
+        [result appendAttributedString:[[NSAttributedString alloc] initWithString:key attributes:@{
+            NSFontAttributeName: font, NSForegroundColorAttributeName: kDeepPurple}]];
+        NSString *value = [row[1] stringByAppendingString:(i < rows.count - 1 ? @"\n" : @"")];
+        [result appendAttributedString:[[NSAttributedString alloc] initWithString:value attributes:@{
+            NSFontAttributeName: font, NSForegroundColorAttributeName: UIColor.blackColor}]];
+    }];
+    return result;
+}
+
+@end
+
+#pragma mark - 顶部点击信息面板
+
+@interface OCTapInfoPanel : UIView
+@property (nonatomic, strong, nullable) OCTapRecord *record;
+@end
+
+@implementation OCTapInfoPanel {
+    UILabel *_titleLabel;
+    UILabel *_tableLabel;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    if (self = [super initWithFrame:frame]) {
+        self.backgroundColor = OCHex(0xF3F0FA);
+        _titleLabel = [UILabel new];
+        _titleLabel.numberOfLines = 0;
+        _tableLabel = [UILabel new];
+        _tableLabel.numberOfLines = 0;
+
+        UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[_titleLabel, _tableLabel]];
+        stack.axis = UILayoutConstraintAxisVertical;
+        stack.spacing = 6;
+        stack.translatesAutoresizingMaskIntoConstraints = NO;
+        [self addSubview:stack];
+        [NSLayoutConstraint activateConstraints:@[
+            [stack.topAnchor constraintEqualToAnchor:self.topAnchor constant:12],
+            [stack.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-12],
+            [stack.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:12],
+            [stack.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-12],
+        ]];
+        [self update];
+    }
+    return self;
+}
+
+- (void)setRecord:(OCTapRecord *)record {
+    _record = record;
+    [self update];
+}
+
+- (void)update {
+    OCTapRecord *r = self.record;
+    if (!r) {
+        _titleLabel.text = @"👆 点击下方任意高亮文字，这里会显示点击得到的所有信息";
+        _titleLabel.font = [UIFont systemFontOfSize:14];
+        _titleLabel.textColor = [UIColor colorWithWhite:0 alpha:0.54];
+        _tableLabel.hidden = YES;
+        return;
+    }
+    _titleLabel.text = [NSString stringWithFormat:@"最近点击 · %@\n动作：%@", r.caseName, r.action];
+    _titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    _titleLabel.textColor = UIColor.blackColor;
+    _tableLabel.hidden = NO;
+    _tableLabel.attributedText = [OCInfoTable make:r.info];
+}
+
+@end
+
+#pragma mark - 卡片
+
+@interface OCCardView : UIView
+@property (nonatomic, strong, readonly) UIStackView *stack;
++ (UILabel *)label:(NSString *)text font:(UIFont *)font color:(UIColor *)color;
+@end
+
+@implementation OCCardView
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    if (self = [super initWithFrame:frame]) {
+        self.backgroundColor = UIColor.whiteColor;
+        self.layer.cornerRadius = 12;
+        self.layer.shadowColor = UIColor.blackColor.CGColor;
+        self.layer.shadowOpacity = 0.08;
+        self.layer.shadowRadius = 4;
+        self.layer.shadowOffset = CGSizeMake(0, 1);
+
+        _stack = [UIStackView new];
+        _stack.axis = UILayoutConstraintAxisVertical;
+        _stack.alignment = UIStackViewAlignmentFill;
+        _stack.translatesAutoresizingMaskIntoConstraints = NO;
+        [self addSubview:_stack];
+        [NSLayoutConstraint activateConstraints:@[
+            [_stack.topAnchor constraintEqualToAnchor:self.topAnchor constant:12],
+            [_stack.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-12],
+            [_stack.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:12],
+            [_stack.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-12],
+        ]];
+    }
+    return self;
+}
+
++ (UILabel *)label:(NSString *)text font:(UIFont *)font color:(UIColor *)color {
+    UILabel *label = [UILabel new];
+    label.text = text;
+    label.font = font;
+    label.textColor = color;
+    label.numberOfLines = 0;
+    return label;
+}
+
+@end
+
+/// 单个用例卡片：标题 + 原始字符串 + 渲染效果 + onParsed 结果
+@interface OCDemoCard : OCCardView
+@property (nonatomic, copy, nullable) NSArray<HTagInfo *> *parsed;
+/// 基类 ZLRichLabel 用例：展示最终生效的规则命中
+@property (nonatomic, copy, nullable) NSArray<TagRichMatch *> *matches;
+- (instancetype)initWithTitle:(NSString *)title source:(NSString *)source content:(UIView *)content;
+@end
+
+@implementation OCDemoCard {
+    UILabel *_parsedTitle;
+    UILabel *_parsedLabel;
+}
+
+- (instancetype)initWithTitle:(NSString *)title source:(NSString *)source content:(UIView *)content {
+    if (self = [super initWithFrame:CGRectZero]) {
+        UIColor *secondary = [UIColor colorWithWhite:0 alpha:0.45];
+        _parsedTitle = [OCCardView label:@"" font:[UIFont systemFontOfSize:12] color:secondary];
+        _parsedLabel = [OCCardView label:@""
+                                    font:[UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular]
+                                   color:[UIColor colorWithWhite:0 alpha:0.54]];
+
+        UILabel *titleLabel = [OCCardView label:title font:[UIFont boldSystemFontOfSize:15] color:UIColor.blackColor];
+        UILabel *sourceTitle = [OCCardView label:@"原始字符串：" font:[UIFont systemFontOfSize:12] color:secondary];
+
+        // 可选中复制的原始字符串
+        UITextView *sourceView = [UITextView new];
+        sourceView.text = source;
+        sourceView.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
+        sourceView.editable = NO;
+        sourceView.selectable = YES;
+        sourceView.scrollEnabled = NO;
+        sourceView.backgroundColor = OCHex(0xF5F5F5);
+        sourceView.layer.cornerRadius = 6;
+        sourceView.textContainerInset = UIEdgeInsetsMake(8, 4, 8, 4);
+
+        UILabel *renderTitle = [OCCardView label:@"渲染效果：" font:[UIFont systemFontOfSize:12] color:secondary];
+
+        UIStackView *stack = self.stack;
+        [stack addArrangedSubview:titleLabel];
+        [stack setCustomSpacing:8 afterView:titleLabel];
+        [stack addArrangedSubview:sourceTitle];
+        [stack setCustomSpacing:4 afterView:sourceTitle];
+        [stack addArrangedSubview:sourceView];
+        [stack setCustomSpacing:8 afterView:sourceView];
+        [stack addArrangedSubview:renderTitle];
+        [stack setCustomSpacing:4 afterView:renderTitle];
+        [stack addArrangedSubview:content];
+        [stack setCustomSpacing:8 afterView:content];
+        [stack addArrangedSubview:_parsedTitle];
+        [stack setCustomSpacing:4 afterView:_parsedTitle];
+        [stack addArrangedSubview:_parsedLabel];
+        [self updateParsed];
+    }
+    return self;
+}
+
+- (void)setParsed:(NSArray<HTagInfo *> *)parsed {
+    _parsed = [parsed copy];
+    [self updateParsed];
+}
+
+- (void)setMatches:(NSArray<TagRichMatch *> *)matches {
+    _matches = [matches copy];
+    [self updateParsed];
+}
+
+- (void)updateParsed {
+    NSArray<HTagInfo *> *parsed = self.parsed;
+    NSArray<TagRichMatch *> *matches = self.matches;
+    if (!parsed && matches) {
+        _parsedTitle.hidden = NO;
+        _parsedLabel.hidden = matches.count == 0;
+        _parsedTitle.text = [NSString stringWithFormat:@"规则命中 matches（共 %lu 个）：", (unsigned long)matches.count];
+        NSMutableArray<NSString *> *lines = [NSMutableArray array];
+        for (TagRichMatch *m in matches) {
+            [lines addObject:[NSString stringWithFormat:@"#%ld  [%@]  text=\"%@\"  priority=%ld",
+                              (long)m.index, m.rule.name, m.text, (long)m.rule.priority]];
+        }
+        _parsedLabel.text = [lines componentsJoinedByString:@"\n"];
+        return;
+    }
+    if (!parsed) {
+        _parsedTitle.hidden = YES;
+        _parsedLabel.hidden = YES;
+        return;
+    }
+    _parsedTitle.hidden = NO;
+    _parsedLabel.hidden = parsed.count == 0;
+    _parsedTitle.text = [NSString stringWithFormat:@"onParsed 回调（共 %lu 个标签）：", (unsigned long)parsed.count];
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    for (HTagInfo *t in parsed) {
+        [lines addObject:[NSString stringWithFormat:@"#%ld  <%@>  text=\"%@\"  level=%@",
+                          (long)t.index, t.name, t.text, t.level ? t.level.stringValue : @"null"]];
+    }
+    _parsedLabel.text = [lines componentsJoinedByString:@"\n"];
+}
+
+@end
+
+/// 点击历史
+@interface OCHistoryCard : OCCardView
+@property (nonatomic, copy) NSArray<OCTapRecord *> *history;
+@end
+
+@implementation OCHistoryCard {
+    UILabel *_titleLabel;
+    UILabel *_contentLabel;
+}
+
++ (NSDateFormatter *)formatter {
+    static NSDateFormatter *f;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        f = [NSDateFormatter new];
+        f.dateFormat = @"HH:mm:ss";
+    });
+    return f;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    if (self = [super initWithFrame:frame]) {
+        _history = @[];
+        _titleLabel = [OCCardView label:@"" font:[UIFont boldSystemFontOfSize:15] color:UIColor.blackColor];
+        _contentLabel = [OCCardView label:@""
+                                     font:[UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular]
+                                    color:UIColor.blackColor];
+        self.stack.spacing = 6;
+        [self.stack addArrangedSubview:_titleLabel];
+        [self.stack addArrangedSubview:_contentLabel];
+        [self update];
+    }
+    return self;
+}
+
+- (void)setHistory:(NSArray<OCTapRecord *> *)history {
+    _history = [history copy];
+    [self update];
+}
+
+- (void)update {
+    _titleLabel.text = [NSString stringWithFormat:@"点击历史（%lu）", (unsigned long)self.history.count];
+    if (self.history.count == 0) {
+        _contentLabel.attributedText = nil;
+        _contentLabel.text = @"暂无";
+        _contentLabel.font = [UIFont systemFontOfSize:14];
+        _contentLabel.textColor = [UIColor colorWithWhite:0 alpha:0.45];
+        return;
+    }
+
+    NSMutableParagraphStyle *paragraph = [NSMutableParagraphStyle new];
+    paragraph.paragraphSpacing = 4;
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    for (OCTapRecord *r in self.history) {
+        NSString *caseNo = [r.caseName componentsSeparatedByString:@" "].firstObject ?: @"";
+        [lines addObject:[NSString stringWithFormat:@"%@  %@ <%@> index=%ld text=\"%@\" action=%@",
+                          [OCHistoryCard.formatter stringFromDate:r.time], caseNo,
+                          r.info.name, (long)r.info.index, r.info.text, r.action]];
+    }
+    _contentLabel.attributedText = [[NSAttributedString alloc]
+        initWithString:[lines componentsJoinedByString:@"\n"]
+            attributes:@{
+                NSFontAttributeName: [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular],
+                NSForegroundColorAttributeName: UIColor.blackColor,
+                NSParagraphStyleAttributeName: paragraph,
+            }];
+}
+
+@end
+
+#pragma mark - 页面
+
+@interface OCDemoViewController : UIViewController
+@end
+
+@interface OCDemoViewController ()
+/// 最近一次点击
+@property (nonatomic, strong, nullable) OCTapRecord *last;
+/// 点击历史
+@property (nonatomic, strong) NSMutableArray<OCTapRecord *> *history;
+@property (nonatomic, strong) OCTapInfoPanel *tapInfoPanel;
+@property (nonatomic, strong) UIScrollView *scrollView;
+@property (nonatomic, strong) UIStackView *stackView;
+@property (nonatomic, strong) OCHistoryCard *historyCard;
+/// 每个用例的卡片（用于显示 onParsed 结果）
+@property (nonatomic, strong) NSMutableDictionary<NSString *, OCDemoCard *> *cards;
+/// 用例 11 / 16 的勾选状态
+@property (nonatomic, assign) BOOL agreed11;
+@property (nonatomic, assign) BOOL agreed16;
+@property (nonatomic, weak) ZLTagRichLabel *case11Label;
+@property (nonatomic, weak) ZLTagRichLabel *case16Label;
+@end
+
+@implementation OCDemoViewController
+
++ (NSDictionary<NSAttributedStringKey, id> *)baseStyle {
+    return @{NSFontAttributeName: [UIFont systemFontOfSize:15],
+             NSForegroundColorAttributeName: [UIColor colorWithWhite:0 alpha:0.87]};
+}
+
+#pragma mark Life cycle
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"HTagRichText Demo (OC)";
+    self.view.backgroundColor = OCHex(0xFEF7FF);
+    self.history = [NSMutableArray array];
+    self.cards = [NSMutableDictionary dictionary];
+
+    UIBarButtonItem *clear = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemTrash
+                                                                           target:self
+                                                                           action:@selector(clearHistory)];
+    clear.accessibilityLabel = @"清空点击记录";
+    self.navigationItem.rightBarButtonItem = clear;
+
+    [self setupLayout];
+
+    [self case1];
+    [self case2];
+    [self case3];
+    [self case4];
+    [self case5];
+    [self case6];
+    [self case7];
+    [self case8];
+    [self case9];
+    [self case10];
+    [self case11];
+    // 阿拉伯语（RTL）
+    [self case12];
+    [self case13];
+    [self case14];
+    [self case15];
+    [self case16];
+    // 自定义正则规则
+    [self case17];
+    [self case18];
+    [self case19];
+    [self case20];
+    [self.stackView addArrangedSubview:self.historyCard];
+
+    [self refreshTapViews];
+}
+
+- (void)setupLayout {
+    self.tapInfoPanel = [OCTapInfoPanel new];
+    self.scrollView = [UIScrollView new];
+    self.stackView = [UIStackView new];
+    self.historyCard = [OCHistoryCard new];
+
+    UIView *divider = [UIView new];
+    divider.backgroundColor = [UIColor colorWithWhite:0 alpha:0.12];
+
+    self.stackView.axis = UILayoutConstraintAxisVertical;
+    self.stackView.spacing = 12;
+    self.stackView.alignment = UIStackViewAlignmentFill;
+
+    for (UIView *v in @[self.tapInfoPanel, divider, self.scrollView]) {
+        v.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.view addSubview:v];
+    }
+    self.stackView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.scrollView addSubview:self.stackView];
+
+    UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
+    UIScrollView *scroll = self.scrollView;
+    [NSLayoutConstraint activateConstraints:@[
+        [self.tapInfoPanel.topAnchor constraintEqualToAnchor:safe.topAnchor],
+        [self.tapInfoPanel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.tapInfoPanel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+
+        [divider.topAnchor constraintEqualToAnchor:self.tapInfoPanel.bottomAnchor],
+        [divider.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [divider.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [divider.heightAnchor constraintEqualToConstant:1],
+
+        [scroll.topAnchor constraintEqualToAnchor:divider.bottomAnchor],
+        [scroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [scroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [scroll.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+
+        [self.stackView.topAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.topAnchor constant:12],
+        [self.stackView.bottomAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.bottomAnchor constant:-12],
+        [self.stackView.leadingAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.leadingAnchor constant:12],
+        [self.stackView.trailingAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.trailingAnchor constant:-12],
+    ]];
+}
+
+#pragma mark Events
+
+- (void)onTap:(NSString *)caseName info:(HTagInfo *)info action:(nullable NSString *)action {
+    OCTapRecord *record = [OCTapRecord new];
+    record.caseName = caseName;
+    record.info = info;
+    record.action = action ?: @"onTagTap（兜底）";
+    record.time = [NSDate date];
+    self.last = record;
+    [self.history insertObject:record atIndex:0];
+    if (self.history.count > 20) { [self.history removeLastObject]; }
+    NSLog(@"[%@] %@ -> %@", caseName, record.action, info);
+    [self refreshTapViews];
+}
+
+- (void)onParsed:(NSString *)caseName tags:(NSArray<HTagInfo *> *)tags {
+    self.cards[caseName].parsed = tags;
+}
+
+- (void)clearHistory {
+    self.last = nil;
+    [self.history removeAllObjects];
+    [self refreshTapViews];
+}
+
+- (void)refreshTapViews {
+    self.tapInfoPanel.record = self.last;
+    self.historyCard.history = self.history;
+}
+
+/// 自定义规则点击 → 记录到点击面板。
+/// 注意：不要在 onTap 里强引用 ctx（ctx 持有 onTap 会循环引用），这里提前取出需要的值
+- (void (^)(void))ruleTapForCase:(NSString *)caseName ctx:(TagRichRuleContext *)ctx action:(NSString *)action {
+    __weak typeof(self) weakSelf = self;
+    NSInteger index = ctx.match.index;
+    NSString *name = [@"rule:" stringByAppendingString:ctx.ruleName];
+    NSString *raw = ctx.matchedText;
+    NSAttributedString *shown = ctx.attributedString; // handler 结束后的最终展示内容
+    return ^{
+        HTagInfo *info = [[HTagInfo alloc] initWithIndex:index name:name text:shown.string raw:raw];
+        [weakSelf onTap:caseName info:info action:action];
+    };
+}
+
+#pragma mark Helper
+
+/// 添加一个用例卡片：标题 + 原始字符串 + 渲染效果 + onParsed 结果
+- (ZLTagRichLabel *)addCase:(NSString *)name
+                     source:(NSString *)source
+                   tappable:(BOOL)tappable
+                  configure:(void (^)(ZLTagRichLabel *v))configure {
+    ZLTagRichLabel *label = [[ZLTagRichLabel alloc] initWithFrame:CGRectZero];
+    label.numberOfLines = 0;
+    label.verticalAlignment = TTTAttributedLabelVerticalAlignmentTop;
+
+    __weak typeof(self) weakSelf = self;
+    // ObjC 的 update: 回调参数为基类 ZLRichLabel，需要转成实际类型
+    [label update:^(ZLRichLabel *base) {
+        ZLTagRichLabel *v = (ZLTagRichLabel *)base;
+        v.style = OCDemoViewController.baseStyle;
+        if (tappable) {
+            v.onTagTap = ^(HTagInfo *info) { [weakSelf onTap:name info:info action:nil]; };
+        }
+        v.onParsed = ^(NSArray<HTagInfo *> *tags) { [weakSelf onParsed:name tags:tags]; };
+        configure(v);
+        v.text = source; // 等同于 v.tagText = source
+    }];
+
+    OCDemoCard *card = [[OCDemoCard alloc] initWithTitle:name source:source content:label];
+    self.cards[name] = card;
+    [self.stackView addArrangedSubview:card];
+    return label;
+}
+
+- (ZLTagRichLabel *)addCase:(NSString *)name source:(NSString *)source configure:(void (^)(ZLTagRichLabel *v))configure {
+    return [self addCase:name source:source tappable:YES configure:configure];
+}
+
+/// 添加一个纯自定义规则的用例：直接使用基类 ZLRichLabel（不解析 <h> 标签）
+/// 卡片底部展示最终生效的规则命中（解析是同步的，设置 text 后即可读取 matches）
+- (ZLRichLabel *)addRuleCase:(NSString *)name source:(NSString *)source configure:(void (^)(ZLRichLabel *v))configure {
+    ZLRichLabel *label = [[ZLRichLabel alloc] initWithFrame:CGRectZero];
+    label.numberOfLines = 0;
+    label.verticalAlignment = TTTAttributedLabelVerticalAlignmentTop;
+    [label update:^(ZLRichLabel *v) {
+        v.style = OCDemoViewController.baseStyle;
+        configure(v);
+        v.text = source; // 等同于 v.rawText = source
+    }];
+
+    OCDemoCard *card = [[OCDemoCard alloc] initWithTitle:name source:source content:label];
+    card.matches = label.matches;
+    self.cards[name] = card;
+    [self.stackView addArrangedSubview:card];
+    return label;
+}
+
+#pragma mark - 各用例
+
+/// 1. 按标签名区分样式（tagStyles）
+- (void)case1 {
+    [self addCase:@"1. 按标签名区分样式（h1 / h2）"
+           source:@"By logging in or registering an account, you agree to the "
+                  @"<h1>User Agreement</h1> and <h2>Privacy Policy</h2>."
+        configure:^(ZLTagRichLabel *v) {
+        v.tagStyle = @{NSFontAttributeName: [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold]};
+        v.tagStyles = @{
+            @"h1": @{NSForegroundColorAttributeName: kBlue,
+                     NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle),
+                     NSUnderlineColorAttributeName: kBlue},
+            @"h2": @{NSForegroundColorAttributeName: kDeepOrange},
+        };
+    }];
+}
+
+/// 2. 只用 <h>，按 index 区分样式（tagStyleBuilder）
+- (void)case2 {
+    NSArray<UIColor *> *colors = @[kRed, kGreen, kPurple];
+    [self addCase:@"2. 同名标签 <h>，按 index 区分样式"
+           source:@"Fruits: <h>Apple</h>, <h>Banana<h/> and <h>Cherry</h>."
+        configure:^(ZLTagRichLabel *v) {
+        v.tagStyleBuilder = ^NSDictionary<NSAttributedStringKey, id> *(HTagInfo *info) {
+            return @{NSForegroundColorAttributeName: colors[info.index % colors.count],
+                     NSFontAttributeName: [UIFont boldSystemFontOfSize:15]};
+        };
+    }];
+}
+
+/// 3. 多种标签名 + 两种闭合写法 + 大小写
+- (void)case3 {
+    [self addCase:@"3. h / h1 / h2 / h3 / H4，</hN> 与 <hN/> 闭合"
+           source:@"<h>Default</h>, <h1>Level one<h1/>, <h2>Level two</h2>, "
+                  @"<h3>Level three<h3/> and <H4>Upper case</H4>."
+        configure:^(ZLTagRichLabel *v) {
+        v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
+        v.tagStyles = @{
+            @"h1": @{NSFontAttributeName: [UIFont boldSystemFontOfSize:15],
+                     NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)},
+            @"h2": @{NSForegroundColorAttributeName: kGreen,
+                     NSFontAttributeName: [UIFont italicSystemFontOfSize:15]},
+            @"h3": @{NSForegroundColorAttributeName: kPurple,
+                     NSBackgroundColorAttributeName: OCHex(0xEDE7F6)},
+            @"h4": @{NSForegroundColorAttributeName: kRed,
+                     NSStrikethroughStyleAttributeName: @(NSUnderlineStyleSingle)},
+        };
+    }];
+}
+
+/// 4. 按标签名区分点击（setTapHandler:forTag:），没有 handler 的走 onTagTap 兜底
+- (void)case4 {
+    NSString *name = @"4. 按标签名区分点击（tagTapHandlers）";
+    __weak typeof(self) weakSelf = self;
+    [self addCase:name
+           source:@"Read <h1>User Agreement</h1>, <h2>Privacy Policy</h2> "
+                  @"and <h3>FAQ</h3> (h3 has no handler → onTagTap)."
+        configure:^(ZLTagRichLabel *v) {
+        v.tagStyles = @{
+            @"h1": @{NSForegroundColorAttributeName: kBlue},
+            @"h2": @{NSForegroundColorAttributeName: kDeepOrange},
+            @"h3": @{NSForegroundColorAttributeName: kTeal},
+        };
+        [v setTapHandler:^(HTagInfo *info) {
+            [weakSelf onTap:name info:info action:@"h1 handler → 打开用户协议"];
+        } forTag:@"h1"];
+        [v setTapHandler:^(HTagInfo *info) {
+            [weakSelf onTap:name info:info action:@"h2 handler → 打开隐私政策"];
+        } forTag:@"h2"];
+    }];
+}
+
+/// 5. 按标签名区分按下高亮（tagHighlightStyles）
+- (void)case5 {
+    [self addCase:@"5. 按标签名区分按下高亮（长按查看）"
+           source:@"Press and hold: <h1>Yellow bg</h1> / <h2>Red text</h2> / "
+                  @"<h3>No highlight</h3> / <h>Default grey</h>."
+        configure:^(ZLTagRichLabel *v) {
+        v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
+        v.tagHighlightStyle = @{NSBackgroundColorAttributeName: OCHex(0xE0E0E0)}; // 默认（<h>）
+        v.tagHighlightStyles = @{
+            @"h1": @{NSBackgroundColorAttributeName: OCHex(0xFFF59D)},
+            @"h2": @{NSForegroundColorAttributeName: kRed,
+                     NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)},
+            @"h3": @{}, // 不高亮
+        };
+    }];
+}
+
+/// 6. 容错：[] 原样展示 / 开闭不匹配 / 未闭合 / 嵌套 / 非 h 标签
+- (void)case6 {
+    [self addCase:@"6. 容错：[] 原样 / 不匹配 / 未闭合 / 嵌套"
+           source:@"Brackets kept: <h1>Terms[1]</h1>; mismatched: <h1>X</h2>; "
+                  @"unclosed: <h2>Y; nested: <h1>a<h2>b</h2>c</h1>; not h: <hx>no</hx>."
+        configure:^(ZLTagRichLabel *v) {
+        v.tagStyles = @{
+            @"h1": @{NSForegroundColorAttributeName: kTeal, NSFontAttributeName: [UIFont boldSystemFontOfSize:15]},
+            @"h2": @{NSForegroundColorAttributeName: kPink, NSFontAttributeName: [UIFont boldSystemFontOfSize:15]},
+        };
+    }];
+}
+
+/// 7. tagSpanBuilder：按标签名加图标
+- (void)case7 {
+    NSDictionary<NSString *, NSString *> *icons = @{@"h1": @"doc.text.fill", @"h2": @"lock.shield.fill"};
+    [self addCase:@"7. tagSpanBuilder 按标签名加图标"
+           source:@"Please read <h1>User Agreement</h1> and "
+                  @"<h2>Privacy Policy</h2> carefully, or <h>skip</h>."
+        configure:^(ZLTagRichLabel *v) {
+        v.tagStyle = @{NSForegroundColorAttributeName: kIndigo};
+        v.tagSpanBuilder = ^NSAttributedString *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+            NSString *icon = icons[info.name];
+            if (!icon) { return nil; } // 返回 nil 使用默认样式
+            return [OCDemoWidgets iconText:icon text:[NSString stringWithFormat:@"《%@》", info.text] style:style];
+        };
+    }];
+}
+
+/// 8. 无点击事件
+- (void)case8 {
+    [self addCase:@"8. 无点击（无 onTagTap / tagTapHandlers）"
+           source:@"Plain text. <h1>Not clickable</h1> and <h2>neither</h2>."
+         tappable:NO
+        configure:^(ZLTagRichLabel *v) {
+        v.tagStyles = @{@"h1": @{NSForegroundColorAttributeName: kBrown},
+                        @"h2": @{NSForegroundColorAttributeName: kGrey}};
+    }];
+}
+
+/// 9. 多行 + maxLines 省略
+- (void)case9 {
+    [self addCase:@"9. maxLines = 2 + 省略号"
+           source:@"This is a very long text to demonstrate the maxLines and "
+                  @"overflow parameters. <h1>First</h1> link, some more words, "
+                  @"<h2>Second</h2> link, and even more words that will be cut off "
+                  @"here <h3>Hidden</h3>."
+        configure:^(ZLTagRichLabel *v) {
+        v.numberOfLines = 2;
+        v.lineBreakMode = NSLineBreakByTruncatingTail;
+        v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
+    }];
+}
+
+/// 10. tagWidgetBuilder：按标签名展示不同的自定义 View
+- (void)case10 {
+    [self addCase:@"10. tagWidgetBuilder 按标签名自定义 View"
+           source:@"Replace: <h1>Follow</h1>  Before: <h2>Hot topic</h2>  "
+                  @"After: <h3>Alice</h3>  Default: <h>Plain</h>"
+        configure:^(ZLTagRichLabel *v) {
+        v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
+        v.tagWidgetBuilder = ^HTagWidget *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+            if ([info.name isEqualToString:@"h1"]) { // 替换文字
+                return [OCDemoWidgets button:[NSString stringWithFormat:@"+ %@ #%ld", info.text, (long)info.index]];
+            }
+            if ([info.name isEqualToString:@"h2"]) { return [OCDemoWidgets redDot:HTagWidgetPositionBefore]; }  // 文字前
+            if ([info.name isEqualToString:@"h3"]) { return [OCDemoWidgets vipBadge:HTagWidgetPositionAfter]; } // 文字后
+            return nil; // 默认文字
+        };
+    }];
+}
+
+/// 11. View 自己处理交互（tappable: NO）
+- (void)case11 {
+    __weak typeof(self) weakSelf = self;
+    self.case11Label = [self addCase:@"11. Widget 自带交互 (tappable: NO)"
+                              source:@"<h0>check</h0> I have read and agree to the "
+                                     @"<h1>User Agreement</h1> and <h2>Privacy Policy</h2>."
+                           configure:^(ZLTagRichLabel *v) {
+        v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
+        v.tagWidgetBuilder = ^HTagWidget *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+            OCDemoViewController *strongSelf = weakSelf;
+            if (!strongSelf || ![info.name isEqualToString:@"h0"]) { return nil; }
+            return [OCDemoWidgets checkbox:strongSelf.agreed11 target:strongSelf action:@selector(toggleAgree11)];
+        };
+    }];
+}
+
+- (void)toggleAgree11 {
+    self.agreed11 = !self.agreed11;
+    [self.case11Label rebuild];
+}
+
+#pragma mark - 阿拉伯语（RTL）用例
+
+/// 12. 阿拉伯语：按标签名区分样式与点击
+- (void)case12 {
+    NSString *name = @"12. 阿拉伯语：按标签名区分样式与点击";
+    __weak typeof(self) weakSelf = self;
+    [self addCase:name
+           source:@"بتسجيل الدخول أو إنشاء حساب، فإنك توافق على "
+                  @"<h1>اتفاقية المستخدم</h1> و<h2>سياسة الخصوصية</h2>."
+        configure:^(ZLTagRichLabel *v) {
+        v.tagStyle = @{NSFontAttributeName: [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold]};
+        v.tagStyles = @{
+            @"h1": @{NSForegroundColorAttributeName: kBlue,
+                     NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)},
+            @"h2": @{NSForegroundColorAttributeName: kDeepOrange},
+        };
+        [v setTapHandler:^(HTagInfo *info) {
+            [weakSelf onTap:name info:info action:@"h1 handler → اتفاقية المستخدم"];
+        } forTag:@"h1"];
+        [v setTapHandler:^(HTagInfo *info) {
+            [weakSelf onTap:name info:info action:@"h2 handler → سياسة الخصوصية"];
+        } forTag:@"h2"];
+    }];
+}
+
+/// 13. 阿拉伯语 + 英文混排（双向文本）
+- (void)case13 {
+    [self addCase:@"13. 阿拉伯语 + 英文混排"
+           source:@"اقرأ <h1>Terms of Service</h1> ثم <h2>الأسئلة الشائعة</h2> "
+                  @"وتواصل مع <h3>Support Team</h3> أو <h>نحن</h>."
+        configure:^(ZLTagRichLabel *v) {
+        v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
+        v.tagStyles = @{
+            @"h1": @{NSFontAttributeName: [UIFont boldSystemFontOfSize:15],
+                     NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)},
+            @"h2": @{NSBackgroundColorAttributeName: OCHex(0xE0E0E0)},
+            @"h3": @{NSForegroundColorAttributeName: kGreen},
+        };
+    }];
+}
+
+/// 14. 阿拉伯语多行 + maxLines 省略
+- (void)case14 {
+    [self addCase:@"14. 阿拉伯语 maxLines = 2 + 省略号"
+           source:@"هذا نص طويل جدًا لإظهار خاصية الحد الأقصى لعدد الأسطر. "
+                  @"<h1>الرابط الأول</h1> بعض الكلمات الإضافية، "
+                  @"<h2>الرابط الثاني</h2> والمزيد من الكلمات التي سيتم قطعها هنا "
+                  @"<h3>مخفي</h3>."
+        configure:^(ZLTagRichLabel *v) {
+        v.numberOfLines = 2;
+        v.lineBreakMode = NSLineBreakByTruncatingTail;
+        v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
+    }];
+}
+
+/// 15. 阿拉伯语 + 按标签名自定义 View / 图标
+- (void)case15 {
+    [self addCase:@"15. 阿拉伯语 + 自定义 Widget / 图标"
+           source:@"تابع: <h1>متابعة</h1>  جديد: <h2>موضوع رائج</h2>  "
+                  @"مميز: <h3>علي</h3>  اقرأ <h4>الاتفاقية</h4>."
+        configure:^(ZLTagRichLabel *v) {
+        v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
+        v.tagSpanBuilder = ^NSAttributedString *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+            if (![info.name isEqualToString:@"h4"]) { return nil; }
+            return [OCDemoWidgets iconText:@"doc.text.fill" text:[NSString stringWithFormat:@"«%@»", info.text] style:style];
+        };
+        v.tagWidgetBuilder = ^HTagWidget *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+            if ([info.name isEqualToString:@"h1"]) {
+                return [OCDemoWidgets button:[NSString stringWithFormat:@"+ %@", info.text]];
+            }
+            if ([info.name isEqualToString:@"h2"]) { return [OCDemoWidgets redDot:HTagWidgetPositionBefore]; }
+            if ([info.name isEqualToString:@"h3"]) { return [OCDemoWidgets vipBadge:HTagWidgetPositionAfter]; }
+            return nil;
+        };
+    }];
+}
+
+/// 16. 阿拉伯语 + 勾选框（tappable: NO）
+- (void)case16 {
+    __weak typeof(self) weakSelf = self;
+    self.case16Label = [self addCase:@"16. 阿拉伯语 + 勾选框 (tappable: NO)"
+                              source:@"<h0>check</h0> لقد قرأت وأوافق على "
+                                     @"<h1>اتفاقية المستخدم</h1> و<h2>سياسة الخصوصية</h2>."
+                           configure:^(ZLTagRichLabel *v) {
+        v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
+        v.tagWidgetBuilder = ^HTagWidget *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+            OCDemoViewController *strongSelf = weakSelf;
+            if (!strongSelf || ![info.name isEqualToString:@"h0"]) { return nil; }
+            return [OCDemoWidgets checkbox:strongSelf.agreed16 target:strongSelf action:@selector(toggleAgree16)];
+        };
+    }];
+}
+
+- (void)toggleAgree16 {
+    self.agreed16 = !self.agreed16;
+    [self.case16Label rebuild];
+}
+
+#pragma mark - 自定义正则规则用例
+
+/// 17. 自定义规则（基类 ZLRichLabel）：@提及 / #话题# / 链接（NSDataDetector）
+- (void)case17 {
+    NSString *name = @"17. ZLRichLabel 自定义规则：@提及 / #话题# / 链接";
+    __weak typeof(self) weakSelf = self;
+    [self addRuleCase:name
+               source:@"Hi @alice and @bob_99, join #SwiftUI# talk: https://www.apple.com/swift"
+            configure:^(ZLRichLabel *v) {
+        // @提及
+        [v addRuleWithName:@"mention" pattern:@"@\\w+" options:0 priority:10 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            [ctx addAttributes:@{NSForegroundColorAttributeName: kPurple,
+                                 NSFontAttributeName: [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold]}];
+            NSString *action = [NSString stringWithFormat:@"mention → 打开 %@ 的主页", ctx.matchedText];
+            ctx.onTap = [weakSelf ruleTapForCase:name ctx:ctx action:action];
+        }];
+        // #话题#
+        [v addRuleWithName:@"topic" pattern:@"#[^#\\s]+#" options:0 priority:10 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            [ctx addAttributes:@{NSForegroundColorAttributeName: kDeepOrange}];
+            ctx.highlightStyle = @{NSBackgroundColorAttributeName: OCHex(0xFFE0B2)};
+            NSString *action = [NSString stringWithFormat:@"topic → 打开话题 %@", ctx.matchedText];
+            ctx.onTap = [weakSelf ruleTapForCase:name ctx:ctx action:action];
+        }];
+        // 链接：NSDataDetector 也是 NSRegularExpression，替换展示文字
+        NSDataDetector *detector = [NSDataDetector dataDetectorWithTypes:NSTextCheckingTypeLink error:nil];
+        if (detector) {
+            [v addRule:[[TagRichRule alloc] initWithName:@"link" regex:detector priority:10
+                                                 handler:^(TagRichRuleContext *ctx) {
+                NSString *url = ctx.match.result.URL.absoluteString ?: ctx.matchedText;
+                [ctx setText:@"🔗网页链接" attributes:@{NSForegroundColorAttributeName: kBlue,
+                                                    NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)}];
+                NSString *action = [NSString stringWithFormat:@"link → 打开 %@", url];
+                ctx.onTap = [weakSelf ruleTapForCase:name ctx:ctx action:action];
+            }]];
+        }
+    }];
+}
+
+/// 18. 外部解析后替换内容（基类 ZLRichLabel）：表情图片 / 模板变量（命名捕获组）
+- (void)case18 {
+    NSString *name = @"18. ZLRichLabel 外部解析替换：[smile] 表情 / {{变量}}";
+    NSDictionary<NSString *, NSString *> *symbols = @{@"smile": @"face.smiling", @"heart": @"heart.fill", @"star": @"star.fill"};
+    NSDictionary<NSString *, UIColor *> *colors = @{@"smile": kOrange, @"heart": kRed, @"star": kAmber};
+    NSDictionary<NSString *, NSString *> *variables = @{@"name": @"Alice", @"count": @"3"};
+    __weak typeof(self) weakSelf = self;
+    [self addRuleCase:name
+               source:@"Hello {{name}} [smile], you have {{count}} new messages [heart][star]. "
+                      @"Unknown: {{foo}} [xxx]."
+            configure:^(ZLRichLabel *v) {
+        // 表情：把 [smile] 替换为图片（NSTextAttachment 会被自动转换为 View），点击图片也能响应
+        [v addRuleWithName:@"emoji" pattern:@"\\[(smile|heart|star)\\]" options:0 priority:5 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            NSString *key = [ctx groupAtIndex:1];
+            NSString *symbol = key ? symbols[key] : nil;
+            if (!symbol) { return; }
+            UIImage *image = [[UIImage systemImageNamed:symbol] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+            if (!image) { return; }
+            NSTextAttachment *attachment = [NSTextAttachment new];
+            attachment.image = image;
+            attachment.bounds = CGRectMake(0, 0, 17, 17);
+            NSMutableAttributedString *content = [[NSAttributedString attributedStringWithAttachment:attachment] mutableCopy];
+            [content addAttributes:@{NSForegroundColorAttributeName: colors[key] ?: kGrey}
+                             range:NSMakeRange(0, content.length)];
+            [ctx.attributedString setAttributedString:content];
+            ctx.onTap = [weakSelf ruleTapForCase:name ctx:ctx action:[@"emoji → " stringByAppendingString:key]];
+        }];
+        // 模板变量：命名捕获组取 key，外部查值后写回
+        [v addRuleWithName:@"variable" pattern:@"\\{\\{(?<key>\\w+)\\}\\}" options:0 priority:5 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            NSString *value = variables[[ctx groupNamed:@"key"] ?: @""];
+            if (value) {
+                [ctx setText:value attributes:@{NSFontAttributeName: [UIFont boldSystemFontOfSize:15],
+                                                NSForegroundColorAttributeName: kTeal}];
+            } else {
+                [ctx addAttributes:@{NSForegroundColorAttributeName: kGrey,
+                                     NSStrikethroughStyleAttributeName: @(NSUnderlineStyleSingle)}];
+            }
+        }];
+    }];
+}
+
+/// 19. 优先级：手机号规则(20) > <h> 标签(hTagPriority) > 数字规则(1)
+/// 需要和 <h> 标签比较优先级，所以这里用 ZLTagRichLabel
+- (void)case19 {
+    NSString *source = @"Call <h1>13800138000</h1> or 400-123-4567, order 2024.";
+    __weak typeof(self) weakSelf = self;
+    void (^configure)(ZLTagRichLabel *, NSString *) = ^(ZLTagRichLabel *v, NSString *name) {
+        v.tagStyle = @{NSForegroundColorAttributeName: kBlue,
+                       NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)};
+        [v addRuleWithName:@"phone" pattern:@"1\\d{10}" options:0 priority:20 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            [ctx addAttributes:@{NSForegroundColorAttributeName: kGreen,
+                                 NSFontAttributeName: [UIFont boldSystemFontOfSize:15]}];
+            NSString *action = [NSString stringWithFormat:@"phone(20) → 拨打 %@", ctx.matchedText];
+            ctx.onTap = [weakSelf ruleTapForCase:name ctx:ctx action:action];
+        }];
+        [v addRuleWithName:@"number" pattern:@"\\d+" options:0 priority:1 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            [ctx addAttributes:@{NSBackgroundColorAttributeName: OCHex(0xE0E0E0)}];
+        }];
+    };
+
+    NSString *nameA = @"19a. 优先级：phone(20) > h1(0) > number(1)?";
+    [self addCase:nameA source:source configure:^(ZLTagRichLabel *v) {
+        v.hTagPriority = 0; // h1 与 phone 重叠，phone 优先级更高 → h1 整体作废，<h1> 原样显示
+        configure(v, nameA);
+    }];
+    NSString *nameB = @"19b. 优先级：h1(100) > phone(20) > number(1)";
+    [self addCase:nameB source:source configure:^(ZLTagRichLabel *v) {
+        v.hTagPriority = 100; // h1 优先，内部的手机号不再被规则处理
+        configure(v, nameB);
+    }];
+}
+
+/// 20. 只用自定义规则（基类 ZLRichLabel，不解析 <h> 标签）：简易 Markdown
+- (void)case20 {
+    [self addRuleCase:@"20. ZLRichLabel 简易 Markdown（<h> 不解析）"
+               source:@"<h1>not parsed</h1>, **bold**, ~~strike~~, `code` and **nested `x`**."
+            configure:^(ZLRichLabel *v) {
+        // 长的 **...** 先占位（同优先级位置靠前 / 更长优先），内部的 `x` 不会再被处理
+        [v addRuleWithName:@"bold" pattern:@"\\*\\*(.+?)\\*\\*" options:0 priority:0 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            [ctx setText:[ctx groupAtIndex:1] ?: @"" attributes:@{NSFontAttributeName: [UIFont boldSystemFontOfSize:15]}];
+        }];
+        [v addRuleWithName:@"strike" pattern:@"~~(.+?)~~" options:0 priority:0 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            [ctx setText:[ctx groupAtIndex:1] ?: @""
+              attributes:@{NSStrikethroughStyleAttributeName: @(NSUnderlineStyleSingle)}];
+        }];
+        [v addRuleWithName:@"code" pattern:@"`([^`]+)`" options:0 priority:0 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            [ctx setText:[ctx groupAtIndex:1] ?: @"" attributes:@{
+                NSFontAttributeName: [UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightRegular],
+                NSBackgroundColorAttributeName: OCHex(0xEEEEEE),
+                NSForegroundColorAttributeName: kPink,
+            }];
+        }];
+    }];
+}
+
+@end
