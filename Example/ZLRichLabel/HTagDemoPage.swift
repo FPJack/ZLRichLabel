@@ -15,7 +15,7 @@ import ZLRichLabel
 
 private struct TapRecord {
     let caseName: String
-    let info: HTagInfo
+    let info: ZLTagInfo
     /// 触发的点击动作（tagTapHandlers 按标签名分发的结果）
     let action: String
     let time = Date()
@@ -57,7 +57,7 @@ final class HTagDemoPage: UIViewController {
     /// 用例 25：长按菜单从手势位置弹出
     private weak var case25Label: ZLTagRichLabel?
 
-    private static let baseStyle: HTagTextStyle = [
+    private static let baseStyle: ZLTextStyle = [
         .font: UIFont.systemFont(ofSize: 15),
         .foregroundColor: UIColor(white: 0, alpha: 0.87),
     ]
@@ -183,7 +183,7 @@ final class HTagDemoPage: UIViewController {
 
     // MARK: Events
 
-    private func onTap(_ caseName: String, _ info: HTagInfo, action: String = "onTagTap（兜底）") {
+    private func onTap(_ caseName: String, _ info: ZLTagInfo, action: String = "onTagTap（兜底）") {
         let record = TapRecord(caseName: caseName, info: info, action: action)
         last = record
         history.insert(record, at: 0)
@@ -192,7 +192,7 @@ final class HTagDemoPage: UIViewController {
         refreshTapViews()
     }
 
-    private func onParsed(_ caseName: String, _ tags: [HTagInfo]) {
+    private func onParsed(_ caseName: String, _ tags: [ZLTagInfo]) {
         cards[caseName]?.parsed = tags
     }
 
@@ -535,10 +535,9 @@ final class HTagDemoPage: UIViewController {
     // MARK: - 自定义正则规则用例
 
     /// 自定义规则点击 → 记录到点击面板
-    private func onRuleTap(_ caseName: String, _ ctx: TagRichRuleContext, action: String) {
-        let info = HTagInfo(index: ctx.match.index, name: "rule:\(ctx.ruleName)",
-                            text: ctx.attributedString.string, raw: ctx.matchedText)
-        onTap(caseName, info, action: action)
+    /// 规则点击：onTap 的参数就是这次点击的命中，不需要（也不要）在回调里引用 ctx
+    private func onRuleTap(_ caseName: String, _ match: ZLRichMatch, action: String) {
+        onTap(caseName, ruleInfo(match), action: action)
     }
 
     /// 17. 自定义规则（基类 ZLRichLabel）：@提及 / #话题# / 链接（NSDataDetector）
@@ -550,21 +549,23 @@ final class HTagDemoPage: UIViewController {
             try? v.addRule(name: "mention", pattern: "@\\w+", priority: 10) { [weak self] ctx in
                 ctx.addAttributes([.foregroundColor: UIColor.mPurple,
                                    .font: UIFont.systemFont(ofSize: 15, weight: .semibold)])
-                ctx.onTap = { self?.onRuleTap(name, ctx, action: "mention → 打开 \(ctx.matchedText) 的主页") }
+                ctx.onTap = { match in self?.onRuleTap(name, match, action: "mention → 打开 \(match.text) 的主页") }
             }
             // #话题#
             try? v.addRule(name: "topic", pattern: "#[^#\\s]+#", priority: 10) { [weak self] ctx in
                 ctx.addAttributes([.foregroundColor: UIColor.mDeepOrange])
                 ctx.highlightStyle = [.backgroundColor: UIColor(hex: 0xFFE0B2)]
-                ctx.onTap = { self?.onRuleTap(name, ctx, action: "topic → 打开话题 \(ctx.matchedText)") }
+                ctx.onTap = { match in self?.onRuleTap(name, match, action: "topic → 打开话题 \(match.text)") }
             }
             // 链接：NSDataDetector 也是 NSRegularExpression，替换展示文字
             if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
-                v.addRule(TagRichRule(name: "link", regex: detector, priority: 10) { [weak self] ctx in
-                    let url = ctx.match.result.url?.absoluteString ?? ctx.matchedText
+                v.addRule(ZLRichRule(name: "link", regex: detector, priority: 10) { [weak self] ctx in
                     ctx.setText("🔗网页链接", attributes: [.foregroundColor: UIColor.mBlue,
                                                        .underlineStyle: NSUnderlineStyle.single.rawValue])
-                    ctx.onTap = { self?.onRuleTap(name, ctx, action: "link → 打开 \(url)") }
+                    ctx.onTap = { match in
+                        let url = match.result.url?.absoluteString ?? match.text
+                        self?.onRuleTap(name, match, action: "link → 打开 \(url)")
+                    }
                 })
             }
         }
@@ -590,7 +591,7 @@ final class HTagDemoPage: UIViewController {
                 content.addAttributes([.foregroundColor: colors[key] ?? UIColor.mGrey],
                                       range: NSRange(location: 0, length: content.length))
                 ctx.attributedString.setAttributedString(content)
-                ctx.onTap = { self?.onRuleTap(name, ctx, action: "emoji → \(key)") }
+                ctx.onTap = { match in self?.onRuleTap(name, match, action: "emoji → \(match.group(1) ?? "")") }
                 
             }
             // 模板变量：命名捕获组取 key，外部查值后写回
@@ -607,7 +608,7 @@ final class HTagDemoPage: UIViewController {
         }
     }
 
-    /// 19. 优先级：手机号规则(20) > <h> 标签(hTagPriority) > 数字规则(1)
+    /// 19. 优先级：手机号规则(20) > <h> 标签(tagPriority) > 数字规则(1)
     /// 需要和 <h> 标签比较优先级，所以这里用 ZLTagRichLabel
     private func case19() {
         let source = "Call <h1>13800138000</h1> or 400-123-4567, order 2024."
@@ -615,7 +616,7 @@ final class HTagDemoPage: UIViewController {
             v.tagStyle = [.foregroundColor: UIColor.mBlue, .underlineStyle: NSUnderlineStyle.single.rawValue]
             try? v.addRule(name: "phone", pattern: "1\\d{10}", priority: 20) { ctx in
                 ctx.addAttributes([.foregroundColor: UIColor.mGreen, .font: UIFont.boldSystemFont(ofSize: 15)])
-                ctx.onTap = { self?.onRuleTap(name, ctx, action: "phone(20) → 拨打 \(ctx.matchedText)") }
+                ctx.onTap = { match in self?.onRuleTap(name, match, action: "phone(20) → 拨打 \(match.text)") }
             }
             try? v.addRule(name: "number", pattern: "\\d+", priority: 1) { ctx in
                 ctx.addAttributes([.backgroundColor: UIColor(hex: 0xE0E0E0)])
@@ -623,12 +624,12 @@ final class HTagDemoPage: UIViewController {
         }
         let nameA = "19a. 优先级：phone(20) > h1(0) > number(1)?"
         addCase(nameA, source: source) { v in
-            v.hTagPriority = 0 // h1 与 phone 重叠，phone 优先级更高 → h1 整体作废，<h1> 原样显示
+            v.tagPriority = 0 // h1 与 phone 重叠，phone 优先级更高 → h1 整体作废，<h1> 原样显示
             configure(v, nameA)
         }
         let nameB = "19b. 优先级：h1(100) > phone(20) > number(1)"
         addCase(nameB, source: source) { v in
-            v.hTagPriority = 100 // h1 优先，内部的手机号不再被规则处理
+            v.tagPriority = 100 // h1 优先，内部的手机号不再被规则处理
             configure(v, nameB)
         }
     }
@@ -722,7 +723,7 @@ final class HTagDemoPage: UIViewController {
                 badge.backgroundColor = .dynamic(light: .mDeepOrange, dark: UIColor(hex: 0xFF8A65))
                 badge.layer.cornerRadius = 4
                 badge.layer.masksToBounds = true
-                return HTagWidget(view: badge)
+                return ZLRichWidget(view: badge)
             }
             // 规则 handler 也会重新执行：按当前外观返回不同内容
             try? v.addRule(name: "mode", pattern: "\\{mode\\}") { ctx in
@@ -824,7 +825,7 @@ final class HTagDemoPage: UIViewController {
             ]
             // 按属性设置样式：<color value="…">、<size value="…">
             v.tagStyleBuilder = { info in
-                var style: HTagTextStyle = [:]
+                var style: ZLTextStyle = [:]
                 if info.name == "color", let color = info.colorAttribute("value") {
                     style[.foregroundColor] = color
                 }
@@ -843,7 +844,7 @@ final class HTagDemoPage: UIViewController {
                 let icon = UIImageView(image: UIImage(systemName: symbol))
                 icon.tintColor = info.colorAttribute("color") ?? .mGrey
                 icon.contentMode = .scaleAspectFit
-                return HTagWidget(view: icon, size: CGSize(width: 16, height: 16))
+                return ZLRichWidget(view: icon, size: CGSize(width: 16, height: 16))
             }
             // <a> 读取 href；其他标签走 onTagTap（内层标签优先响应点击）
             v.tagTapHandlers = ["a": { info in
@@ -902,12 +903,9 @@ final class HTagDemoPage: UIViewController {
             ]
             // #话题#：胶囊 + 点击
             try? v.addRule(name: "topic", pattern: "#[^#\\s]+#") { ctx in
-                let topic = ctx.matchedText
                 ctx.addAttributes([.foregroundColor: UIColor.mPurple, .zlBackground: ZLTextBackground.capsule(.mPurple)])
                 ctx.highlightStyle = [.zlBackground: ZLTextBackground(fillColor: UIColor.mPurple.withAlphaComponent(0.3))]
-                ctx.onTap = {
-                    self?.onTap(name, HTagInfo(index: 0, name: "topic", text: topic, raw: topic), action: "点击话题")
-                }
+                ctx.onTap = { match in self?.onRuleTap(name, match, action: "点击话题") }
             }
             // `代码`：去掉反引号，等宽字体 + 灰色背景 + 细边框
             try? v.addRule(name: "code", pattern: "`([^`]+)`") { ctx in
@@ -960,7 +958,7 @@ final class HTagDemoPage: UIViewController {
                     + "selectedRawText = \"\(label.selectedRawText ?? "")\""
             }
             v.onCopy = { [weak self] text, isRaw in
-                let info = HTagInfo(index: 0, name: isRaw ? "copy-raw" : "copy", text: text, raw: "")
+                let info = ZLTagInfo(index: 0, name: isRaw ? "copy-raw" : "copy", text: text, raw: "")
                 self?.onTap(name, info, action: isRaw ? "onCopy → 复制原文" : "onCopy → 复制展示文字")
             }
             v.text = source
@@ -993,13 +991,14 @@ final class HTagDemoPage: UIViewController {
             // 规则命中自己的长按：只回调它，不再回调 onLongPress
             try? v.addRule(name: "mention", pattern: "@\\w+") { [weak self] ctx in
                 ctx.addAttributes([.foregroundColor: UIColor.mPurple, .font: UIFont.boldSystemFont(ofSize: 15)])
-                let user = ctx.matchedText
-                let info = HTagInfo(index: ctx.match.index, name: "rule:mention", text: user, raw: user)
-                ctx.onTap = { self?.onTap(name, info, action: "mention onTap → 打开 \(user) 的主页") }
-                ctx.onLongPress = {
-                    self?.showMenu25(title: user, items: [
-                        ("复制 \(user)", { self?.copy25(user, caseName: name, info: info) }),
-                        ("举报 \(user)", { self?.onTap(name, info, action: "ctx.onLongPress → 举报 \(user)") }),
+                ctx.onTap = { match in self?.onRuleTap(name, match, action: "mention onTap → 打开 \(match.text) 的主页") }
+                ctx.onLongPress = { match in
+                    guard let self = self else { return }
+                    let user = match.text
+                    let info = self.ruleInfo(match)
+                    self.showMenu25(title: user, items: [
+                        ("复制 \(user)", { [weak self] in self?.copy25(user, caseName: name, info: info) }),
+                        ("举报 \(user)", { [weak self] in self?.onTap(name, info, action: "ctx.onLongPress → 举报 \(user)") }),
                     ])
                 }
             }
@@ -1011,7 +1010,7 @@ final class HTagDemoPage: UIViewController {
             }
             // 其他位置的长按：复制原文 / 展示文字、举报
             v.onLongPress = { [weak self] gesture in
-                let info = HTagInfo(index: gesture.characterIndex, name: "long-press",
+                let info = ZLTagInfo(index: gesture.characterIndex, name: "long-press",
                                     text: gesture.displayText, raw: gesture.rawText)
                 self?.showMenu25(title: "长按位置字符下标：\(gesture.characterIndex)", items: [
                     ("复制原文（rawText）", { self?.copy25(gesture.rawText, caseName: name, info: info) }),
@@ -1022,7 +1021,7 @@ final class HTagDemoPage: UIViewController {
             // 双击：设置后单击链接会等双击判定失败才触发（约 0.3 秒）
             v.onDoubleTap = { [weak self] gesture in
                 guard let self = self, let label = self.case25Label else { return }
-                let info = HTagInfo(index: gesture.characterIndex, name: "double-tap",
+                let info = ZLTagInfo(index: gesture.characterIndex, name: "double-tap",
                                     text: gesture.matchDisplayText ?? "", raw: gesture.match?.text ?? "")
                 self.onTap(name, info, action: "onDoubleTap → 点赞 ❤️（位置 \(Int(gesture.location.x)), \(Int(gesture.location.y))）")
                 self.showHeart25(in: label, at: gesture.location)
@@ -1044,7 +1043,7 @@ final class HTagDemoPage: UIViewController {
         present(sheet, animated: true)
     }
 
-    private func copy25(_ text: String, caseName: String, info: HTagInfo) {
+    private func copy25(_ text: String, caseName: String, info: ZLTagInfo) {
         UIPasteboard.general.string = text
         onTap(caseName, info, action: "已复制：\(text.prefix(40))\(text.count > 40 ? "…" : "")")
     }
@@ -1079,13 +1078,13 @@ final class HTagDemoPage: UIViewController {
                 v.numberOfLines = 3
                 v.tagStyle = [.foregroundColor: UIColor.mBlue]
                 v.tagHighlightStyle = [.backgroundColor: UIColor(white: 0, alpha: 0.08)]
-                let tokenStyle: HTagTextStyle = [.foregroundColor: UIColor.mDeepOrange,
+                let tokenStyle: ZLTextStyle = [.foregroundColor: UIColor.mDeepOrange,
                                                  .font: UIFont.systemFont(ofSize: 15, weight: .semibold)]
                 v.expandToken = NSAttributedString(string: "… 全文", attributes: tokenStyle)
                 v.collapseToken = NSAttributedString(string: " 收起", attributes: tokenStyle)
                 v.onExpandChanged = { [weak self] expanded in
                     guard let self = self else { return }
-                    let info = HTagInfo(index: 0, name: "expand", text: expanded ? "全文" : "收起", raw: "")
+                    let info = ZLTagInfo(index: 0, name: "expand", text: expanded ? "全文" : "收起", raw: "")
                     self.onTap(title, info, action: "onExpandChanged(\(expanded))")
                     UIView.animate(withDuration: 0.25) { self.view.layoutIfNeeded() }
                 }
@@ -1113,9 +1112,7 @@ final class HTagDemoPage: UIViewController {
             try? v.addRule(name: "mention", pattern: "@\\w+") { [weak self] ctx in
                 let purple = self?.mentionPurple23 ?? true
                 ctx.addAttributes([.foregroundColor: purple ? UIColor.mPurple : UIColor.mGreen])
-                ctx.onTap = { [weak self, info = self?.ruleInfo(ctx)] in
-                    if let info = info { self?.onTap(name, info, action: "rule onTap") }
-                }
+                ctx.onTap = { match in self?.onRuleTap(name, match, action: "rule onTap") }
             }
             try? v.addRule(name: "emoji", pattern: "\\[smile\\]") { ctx in
                 let attachment = NSTextAttachment()
@@ -1169,9 +1166,8 @@ final class HTagDemoPage: UIViewController {
     }
 
     /// 规则命中 → 点击面板展示的信息（不要在 onTap 里强引用 ctx）
-    private func ruleInfo(_ ctx: TagRichRuleContext) -> HTagInfo {
-        return HTagInfo(index: ctx.match.index, name: "rule:\(ctx.ruleName)",
-                        text: ctx.attributedString.string, raw: ctx.matchedText)
+    private func ruleInfo(_ match: ZLRichMatch) -> ZLTagInfo {
+        return ZLTagInfo(index: match.index, name: "rule:\(match.rule.name)", text: match.text, raw: match.text)
     }
 
     /// 执行操作并展示耗时与缓存统计
@@ -1233,14 +1229,14 @@ final class HTagDemoPage: UIViewController {
     @objc private func parse23() {
         let text = String(repeating: "@user #tag# word ", count: 5000)
         let rules = [
-            try! TagRichRule(name: "mention", pattern: "@\\w+") { _ in },
-            try! TagRichRule(name: "topic", pattern: "#\\w+#") { _ in },
-            try! TagRichRule(name: "word", pattern: "\\w+", priority: -1) { _ in },
+            try! ZLRichRule(name: "mention", pattern: "@\\w+") { _ in },
+            try! ZLRichRule(name: "topic", pattern: "#\\w+#") { _ in },
+            try! ZLRichRule(name: "word", pattern: "\\w+", priority: -1) { _ in },
         ]
         let start = CACurrentMediaTime()
-        let matches = TagRichParser.resolve(text, rules: rules)
+        let matches = ZLRichParser.resolve(text, rules: rules)
         let ms = (CACurrentMediaTime() - start) * 1000
-        case23Stats?.text = String(format: "TagRichParser.resolve：%.2f ms\n", ms)
+        case23Stats?.text = String(format: "ZLRichParser.resolve：%.2f ms\n", ms)
             + "文本 \((text as NSString).length) 字符，3 条规则，生效命中 \(matches.count) 个\n"
             + "（含正则匹配耗时；label 未参与）"
     }
@@ -1251,18 +1247,18 @@ final class HTagDemoPage: UIViewController {
 
 private enum DemoWidgets {
     /// 可变宽度的色块（固定尺寸，点击时外部直接改 frame）
-    static func growBox(width: CGFloat, target: Any, action: Selector) -> HTagWidget {
+    static func growBox(width: CGFloat, target: Any, action: Selector) -> ZLRichWidget {
         let box = UIView()
         box.backgroundColor = .mOrange
         box.layer.cornerRadius = 4
         box.addGestureRecognizer(UITapGestureRecognizer(target: target, action: action))
-        return HTagWidget(view: box, size: CGSize(width: width, height: 16), tappable: false)
+        return ZLRichWidget(view: box, size: CGSize(width: width, height: 16), tappable: false)
     }
 
     static func likeText(_ likes: Int) -> String { "👍 \(likes)" }
 
     /// 点赞计数（size 传 .zero 自动计算，文字变化后重新测量）
-    static func likeCounter(_ likes: Int, target: Any, action: Selector) -> HTagWidget {
+    static func likeCounter(_ likes: Int, target: Any, action: Selector) -> ZLRichWidget {
         let counter = PaddingLabel(insets: UIEdgeInsets(top: 1, left: 6, bottom: 1, right: 6))
         counter.text = likeText(likes)
         counter.font = .systemFont(ofSize: 12)
@@ -1272,11 +1268,11 @@ private enum DemoWidgets {
         counter.layer.masksToBounds = true
         counter.isUserInteractionEnabled = true
         counter.addGestureRecognizer(UITapGestureRecognizer(target: target, action: action))
-        return HTagWidget(view: counter, tappable: false)
+        return ZLRichWidget(view: counter, tappable: false)
     }
 
     /// 按钮样式（替换文字）
-    static func button(_ title: String) -> HTagWidget {
+    static func button(_ title: String) -> ZLRichWidget {
         let button = PaddingLabel(insets: UIEdgeInsets(top: 2, left: 10, bottom: 2, right: 10))
         button.text = title
         button.font = .systemFont(ofSize: 12)
@@ -1284,21 +1280,21 @@ private enum DemoWidgets {
         button.backgroundColor = .mBlue
         button.layer.cornerRadius = 12
         button.layer.masksToBounds = true
-        return HTagWidget(view: button, size: button.intrinsicContentSize)
+        return ZLRichWidget(view: button, size: button.intrinsicContentSize)
     }
 
     /// 红点（与文字间距 4）
-    static func redDot(position: HTagWidgetPosition) -> HTagWidget {
+    static func redDot(position: ZLRichWidgetPosition) -> ZLRichWidget {
         let container = UIView()
         let dot = UIView(frame: CGRect(x: 2, y: 0, width: 8, height: 8))
         dot.backgroundColor = .mRed
         dot.layer.cornerRadius = 4
         container.addSubview(dot)
-        return HTagWidget(view: container, size: CGSize(width: 12, height: 8), position: position)
+        return ZLRichWidget(view: container, size: CGSize(width: 12, height: 8), position: position)
     }
 
     /// VIP 徽章（与文字间距 4）
-    static func vipBadge(position: HTagWidgetPosition) -> HTagWidget {
+    static func vipBadge(position: ZLRichWidgetPosition) -> ZLRichWidget {
         let badge = PaddingLabel(insets: UIEdgeInsets(top: 0, left: 4, bottom: 0, right: 4))
         badge.text = "VIP"
         badge.font = .boldSystemFont(ofSize: 10)
@@ -1310,18 +1306,18 @@ private enum DemoWidgets {
         badge.frame = CGRect(x: 2, y: 0, width: size.width, height: size.height)
         let container = UIView()
         container.addSubview(badge)
-        return HTagWidget(view: container, size: CGSize(width: size.width + 4, height: size.height), position: position)
+        return ZLRichWidget(view: container, size: CGSize(width: size.width + 4, height: size.height), position: position)
     }
 
     /// 勾选框（自己处理点击，不触发 onTagTap）
-    static func checkbox(checked: Bool, target: Any, action: Selector) -> HTagWidget {
+    static func checkbox(checked: Bool, target: Any, action: Selector) -> ZLRichWidget {
         let container = UIView()
         let icon = UIImageView(frame: CGRect(x: 2, y: 0, width: 18, height: 18))
         icon.image = UIImage(systemName: checked ? "checkmark.circle.fill" : "circle")
         icon.tintColor = checked ? .mGreen : .mGrey
         container.addSubview(icon)
         container.addGestureRecognizer(UITapGestureRecognizer(target: target, action: action))
-        return HTagWidget(view: container, size: CGSize(width: 22, height: 18), tappable: false)
+        return ZLRichWidget(view: container, size: CGSize(width: 22, height: 18), tappable: false)
     }
 }
 
@@ -1375,9 +1371,9 @@ private final class TapInfoPanel: UIView {
     }
 }
 
-/// HTagInfo 所有字段的表格展示（等宽字体对齐）
+/// ZLTagInfo 所有字段的表格展示（等宽字体对齐）
 private enum InfoTable {
-    static func make(_ info: HTagInfo) -> NSAttributedString {
+    static func make(_ info: ZLTagInfo) -> NSAttributedString {
         func q(_ s: String?) -> String { s.map { "\"\($0)\"" } ?? "null" }
         let rows: [(String, String)] = [
             ("index", "\(info.index)"),
@@ -1439,9 +1435,9 @@ private class CardView: UIView {
 /// 单个用例卡片：标题 + 原始字符串 + 渲染效果 + onParsed 结果
 private final class DemoCard: CardView {
 
-    var parsed: [HTagInfo]? { didSet { updateParsed() } }
+    var parsed: [ZLTagInfo]? { didSet { updateParsed() } }
     /// 基类 ZLRichLabel 用例：展示最终生效的规则命中
-    var matches: [TagRichMatch]? { didSet { updateParsed() } }
+    var matches: [ZLRichMatch]? { didSet { updateParsed() } }
 
     private let parsedTitle = CardView.label("", font: .systemFont(ofSize: 12), color: UIColor(white: 0, alpha: 0.45))
     private let parsedLabel = CardView.label("", font: .monospacedSystemFont(ofSize: 11, weight: .regular),

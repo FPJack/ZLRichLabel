@@ -46,7 +46,7 @@ static NSString *OCQuote(NSString *s) {
 
 @interface OCTapRecord : NSObject
 @property (nonatomic, copy) NSString *caseName;
-@property (nonatomic, strong) HTagInfo *info;
+@property (nonatomic, strong) ZLTagInfo *info;
 /// 触发的点击动作（tagTapHandlers 按标签名分发的结果）
 @property (nonatomic, copy) NSString *action;
 @property (nonatomic, strong) NSDate *time;
@@ -96,15 +96,15 @@ static NSString *OCQuote(NSString *s) {
 @implementation OCDemoWidgets
 
 /// 可变宽度的色块（固定尺寸，点击时外部直接改 frame）
-+ (HTagWidget *)growBox:(CGFloat)width target:(id)target action:(SEL)action {
++ (ZLRichWidget *)growBox:(CGFloat)width target:(id)target action:(SEL)action {
     UIView *box = [UIView new];
     box.backgroundColor = kOrange;
     box.layer.cornerRadius = 4;
     [box addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:target action:action]];
-    return [[HTagWidget alloc] initWithView:box
+    return [[ZLRichWidget alloc] initWithView:box
                                        size:CGSizeMake(width, 16)
-                                   position:HTagWidgetPositionReplace
-                                  alignment:HTagWidgetAlignmentMiddle
+                                   position:ZLRichWidgetPositionReplace
+                                  alignment:ZLRichWidgetAlignmentMiddle
                                    tappable:NO];
 }
 
@@ -113,7 +113,7 @@ static NSString *OCQuote(NSString *s) {
 }
 
 /// 点赞计数（size 传 CGSizeZero 自动计算，文字变化后重新测量）
-+ (HTagWidget *)likeCounter:(NSInteger)likes target:(id)target action:(SEL)action {
++ (ZLRichWidget *)likeCounter:(NSInteger)likes target:(id)target action:(SEL)action {
     OCPaddingLabel *counter = [[OCPaddingLabel alloc] initWithInsets:UIEdgeInsetsMake(1, 6, 1, 6)];
     counter.text = [self likeText:likes];
     counter.font = [UIFont systemFontOfSize:12];
@@ -123,15 +123,15 @@ static NSString *OCQuote(NSString *s) {
     counter.layer.masksToBounds = YES;
     counter.userInteractionEnabled = YES;
     [counter addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:target action:action]];
-    return [[HTagWidget alloc] initWithView:counter
+    return [[ZLRichWidget alloc] initWithView:counter
                                        size:CGSizeZero
-                                   position:HTagWidgetPositionReplace
-                                  alignment:HTagWidgetAlignmentMiddle
+                                   position:ZLRichWidgetPositionReplace
+                                  alignment:ZLRichWidgetAlignmentMiddle
                                    tappable:NO];
 }
 
 /// 按钮样式（替换文字）
-+ (HTagWidget *)button:(NSString *)title {
++ (ZLRichWidget *)button:(NSString *)title {
     OCPaddingLabel *button = [[OCPaddingLabel alloc] initWithInsets:UIEdgeInsetsMake(2, 10, 2, 10)];
     button.text = title;
     button.font = [UIFont systemFontOfSize:12];
@@ -139,25 +139,25 @@ static NSString *OCQuote(NSString *s) {
     button.backgroundColor = kBlue;
     button.layer.cornerRadius = 12;
     button.layer.masksToBounds = YES;
-    return [[HTagWidget alloc] initWithView:button
+    return [[ZLRichWidget alloc] initWithView:button
                                        size:button.intrinsicContentSize
-                                   position:HTagWidgetPositionReplace
-                                  alignment:HTagWidgetAlignmentMiddle
+                                   position:ZLRichWidgetPositionReplace
+                                  alignment:ZLRichWidgetAlignmentMiddle
                                    tappable:YES];
 }
 
 /// 红点（与文字间距 4）
-+ (HTagWidget *)redDot:(HTagWidgetPosition)position {
++ (ZLRichWidget *)redDot:(ZLRichWidgetPosition)position {
     UIView *container = [UIView new];
     UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(2, 0, 8, 8)];
     dot.backgroundColor = kRed;
     dot.layer.cornerRadius = 4;
     [container addSubview:dot];
-    return [HTagWidget widgetWithView:container size:CGSizeMake(12, 8) position:position];
+    return [ZLRichWidget widgetWithView:container size:CGSizeMake(12, 8) position:position];
 }
 
 /// VIP 徽章（与文字间距 4）
-+ (HTagWidget *)vipBadge:(HTagWidgetPosition)position {
++ (ZLRichWidget *)vipBadge:(ZLRichWidgetPosition)position {
     OCPaddingLabel *badge = [[OCPaddingLabel alloc] initWithInsets:UIEdgeInsetsMake(0, 4, 0, 4)];
     badge.text = @"VIP";
     badge.font = [UIFont boldSystemFontOfSize:10];
@@ -169,21 +169,21 @@ static NSString *OCQuote(NSString *s) {
     badge.frame = CGRectMake(2, 0, size.width, size.height);
     UIView *container = [UIView new];
     [container addSubview:badge];
-    return [HTagWidget widgetWithView:container size:CGSizeMake(size.width + 4, size.height) position:position];
+    return [ZLRichWidget widgetWithView:container size:CGSizeMake(size.width + 4, size.height) position:position];
 }
 
 /// 勾选框（自己处理点击，不触发 onTagTap）
-+ (HTagWidget *)checkbox:(BOOL)checked target:(id)target action:(SEL)action {
++ (ZLRichWidget *)checkbox:(BOOL)checked target:(id)target action:(SEL)action {
     UIView *container = [UIView new];
     UIImageView *icon = [[UIImageView alloc] initWithFrame:CGRectMake(2, 0, 18, 18)];
     icon.image = [UIImage systemImageNamed:checked ? @"checkmark.circle.fill" : @"circle"];
     icon.tintColor = checked ? kGreen : kGrey;
     [container addSubview:icon];
     [container addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:target action:action]];
-    return [[HTagWidget alloc] initWithView:container
+    return [[ZLRichWidget alloc] initWithView:container
                                        size:CGSizeMake(22, 18)
-                                   position:HTagWidgetPositionReplace
-                                  alignment:HTagWidgetAlignmentMiddle
+                                   position:ZLRichWidgetPositionReplace
+                                  alignment:ZLRichWidgetAlignmentMiddle
                                    tappable:NO];
 }
 
@@ -203,15 +203,15 @@ static NSString *OCQuote(NSString *s) {
 
 @end
 
-#pragma mark - HTagInfo 表格
+#pragma mark - ZLTagInfo 表格
 
 @interface OCInfoTable : NSObject
 @end
 
 @implementation OCInfoTable
 
-/// HTagInfo 所有字段的表格展示（等宽字体对齐）
-+ (NSAttributedString *)make:(HTagInfo *)info {
+/// ZLTagInfo 所有字段的表格展示（等宽字体对齐）
++ (NSAttributedString *)make:(ZLTagInfo *)info {
     NSArray<NSArray<NSString *> *> *rows = @[
         @[@"index", [NSString stringWithFormat:@"%ld", (long)info.index]],
         @[@"name", OCQuote(info.name)],
@@ -342,9 +342,9 @@ static NSString *OCQuote(NSString *s) {
 
 /// 单个用例卡片：标题 + 原始字符串 + 渲染效果 + onParsed 结果
 @interface OCDemoCard : OCCardView
-@property (nonatomic, copy, nullable) NSArray<HTagInfo *> *parsed;
+@property (nonatomic, copy, nullable) NSArray<ZLTagInfo *> *parsed;
 /// 基类 ZLRichLabel 用例：展示最终生效的规则命中
-@property (nonatomic, copy, nullable) NSArray<TagRichMatch *> *matches;
+@property (nonatomic, copy, nullable) NSArray<ZLRichMatch *> *matches;
 - (instancetype)initWithTitle:(NSString *)title source:(NSString *)source content:(UIView *)content;
 @end
 
@@ -396,25 +396,25 @@ static NSString *OCQuote(NSString *s) {
     return self;
 }
 
-- (void)setParsed:(NSArray<HTagInfo *> *)parsed {
+- (void)setParsed:(NSArray<ZLTagInfo *> *)parsed {
     _parsed = [parsed copy];
     [self updateParsed];
 }
 
-- (void)setMatches:(NSArray<TagRichMatch *> *)matches {
+- (void)setMatches:(NSArray<ZLRichMatch *> *)matches {
     _matches = [matches copy];
     [self updateParsed];
 }
 
 - (void)updateParsed {
-    NSArray<HTagInfo *> *parsed = self.parsed;
-    NSArray<TagRichMatch *> *matches = self.matches;
+    NSArray<ZLTagInfo *> *parsed = self.parsed;
+    NSArray<ZLRichMatch *> *matches = self.matches;
     if (!parsed && matches) {
         _parsedTitle.hidden = NO;
         _parsedLabel.hidden = matches.count == 0;
         _parsedTitle.text = [NSString stringWithFormat:@"规则命中 matches（共 %lu 个）：", (unsigned long)matches.count];
         NSMutableArray<NSString *> *lines = [NSMutableArray array];
-        for (TagRichMatch *m in matches) {
+        for (ZLRichMatch *m in matches) {
             [lines addObject:[NSString stringWithFormat:@"#%ld  [%@]  text=\"%@\"  priority=%ld",
                               (long)m.index, m.rule.name, m.text, (long)m.rule.priority]];
         }
@@ -430,7 +430,7 @@ static NSString *OCQuote(NSString *s) {
     _parsedLabel.hidden = parsed.count == 0;
     _parsedTitle.text = [NSString stringWithFormat:@"onParsed 回调（共 %lu 个标签）：", (unsigned long)parsed.count];
     NSMutableArray<NSString *> *lines = [NSMutableArray array];
-    for (HTagInfo *t in parsed) {
+    for (ZLTagInfo *t in parsed) {
         // 嵌套的标签按深度缩进，有属性时一并显示
         NSString *indent = [@"" stringByPaddingToLength:t.depth * 4 withString:@" " startingAtIndex:0];
         NSString *level = [t.name hasPrefix:@"h"]
@@ -669,7 +669,7 @@ static NSString *OCQuote(NSString *s) {
 
 #pragma mark Events
 
-- (void)onTap:(NSString *)caseName info:(HTagInfo *)info action:(nullable NSString *)action {
+- (void)onTap:(NSString *)caseName info:(ZLTagInfo *)info action:(nullable NSString *)action {
     OCTapRecord *record = [OCTapRecord new];
     record.caseName = caseName;
     record.info = info;
@@ -682,7 +682,7 @@ static NSString *OCQuote(NSString *s) {
     [self refreshTapViews];
 }
 
-- (void)onParsed:(NSString *)caseName tags:(NSArray<HTagInfo *> *)tags {
+- (void)onParsed:(NSString *)caseName tags:(NSArray<ZLTagInfo *> *)tags {
     self.cards[caseName].parsed = tags;
 }
 
@@ -699,16 +699,17 @@ static NSString *OCQuote(NSString *s) {
 
 /// 自定义规则点击 → 记录到点击面板。
 /// 注意：不要在 onTap 里强引用 ctx（ctx 持有 onTap 会循环引用），这里提前取出需要的值
-- (void (^)(void))ruleTapForCase:(NSString *)caseName ctx:(TagRichRuleContext *)ctx action:(NSString *)action {
+/// 规则点击：onTap 的参数就是这次点击的命中，block 里不需要（也不要）引用 ctx
+- (void (^)(ZLRichMatch *))ruleTapForCase:(NSString *)caseName action:(NSString *)action {
     __weak typeof(self) weakSelf = self;
-    NSInteger index = ctx.match.index;
-    NSString *name = [@"rule:" stringByAppendingString:ctx.ruleName];
-    NSString *raw = ctx.matchedText;
-    NSAttributedString *shown = ctx.attributedString; // handler 结束后的最终展示内容
-    return ^{
-        HTagInfo *info = [[HTagInfo alloc] initWithIndex:index name:name text:shown.string raw:raw];
-        [weakSelf onTap:caseName info:info action:action];
+    return ^(ZLRichMatch *match) {
+        [weakSelf onTap:caseName info:[OCDemoViewController infoForMatch:match] action:action];
     };
+}
+
++ (ZLTagInfo *)infoForMatch:(ZLRichMatch *)match {
+    return [[ZLTagInfo alloc] initWithIndex:match.index name:[@"rule:" stringByAppendingString:match.rule.name]
+                                      text:match.text raw:match.text];
 }
 
 #pragma mark Helper
@@ -723,14 +724,13 @@ static NSString *OCQuote(NSString *s) {
     label.verticalAlignment = TTTAttributedLabelVerticalAlignmentTop;
 
     __weak typeof(self) weakSelf = self;
-    // ObjC 的 update: 回调参数为基类 ZLRichLabel，需要转成实际类型
-    [label update:^(ZLRichLabel *base) {
-        ZLTagRichLabel *v = (ZLTagRichLabel *)base;
+    // updateTag: 的回调参数直接是 ZLTagRichLabel，不需要强转
+    [label updateTag:^(ZLTagRichLabel *v) {
         v.style = OCDemoViewController.baseStyle;
         if (tappable) {
-            v.onTagTap = ^(HTagInfo *info) { [weakSelf onTap:name info:info action:nil]; };
+            v.onTagTap = ^(ZLTagInfo *info) { [weakSelf onTap:name info:info action:nil]; };
         }
-        v.onParsed = ^(NSArray<HTagInfo *> *tags) { [weakSelf onParsed:name tags:tags]; };
+        v.onParsed = ^(NSArray<ZLTagInfo *> *tags) { [weakSelf onParsed:name tags:tags]; };
         configure(v);
         v.text = source; // 等同于 v.tagText = source
     }];
@@ -788,7 +788,7 @@ static NSString *OCQuote(NSString *s) {
     [self addCase:@"2. 同名标签 <h>，按 index 区分样式"
            source:@"Fruits: <h>Apple</h>, <h>Banana<h/> and <h>Cherry</h>."
         configure:^(ZLTagRichLabel *v) {
-        v.tagStyleBuilder = ^NSDictionary<NSAttributedStringKey, id> *(HTagInfo *info) {
+        v.tagStyleBuilder = ^NSDictionary<NSAttributedStringKey, id> *(ZLTagInfo *info) {
             return @{NSForegroundColorAttributeName: colors[info.index % colors.count],
                      NSFontAttributeName: [UIFont boldSystemFontOfSize:15]};
         };
@@ -828,10 +828,10 @@ static NSString *OCQuote(NSString *s) {
             @"h2": @{NSForegroundColorAttributeName: kDeepOrange},
             @"h3": @{NSForegroundColorAttributeName: kTeal},
         };
-        [v setTapHandler:^(HTagInfo *info) {
+        [v setTapHandler:^(ZLTagInfo *info) {
             [weakSelf onTap:name info:info action:@"h1 handler → 打开用户协议"];
         } forTag:@"h1"];
-        [v setTapHandler:^(HTagInfo *info) {
+        [v setTapHandler:^(ZLTagInfo *info) {
             [weakSelf onTap:name info:info action:@"h2 handler → 打开隐私政策"];
         } forTag:@"h2"];
     }];
@@ -875,7 +875,7 @@ static NSString *OCQuote(NSString *s) {
                   @"<h2>Privacy Policy</h2> carefully, or <h>skip</h>."
         configure:^(ZLTagRichLabel *v) {
         v.tagStyle = @{NSForegroundColorAttributeName: kIndigo};
-        v.tagSpanBuilder = ^NSAttributedString *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+        v.tagSpanBuilder = ^NSAttributedString *(ZLTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
             NSString *icon = icons[info.name];
             if (!icon) { return nil; } // 返回 nil 使用默认样式
             return [OCDemoWidgets iconText:icon text:[NSString stringWithFormat:@"《%@》", info.text] style:style];
@@ -915,12 +915,12 @@ static NSString *OCQuote(NSString *s) {
                   @"After: <h3>Alice</h3>  Default: <h>Plain</h>"
         configure:^(ZLTagRichLabel *v) {
         v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
-        v.tagWidgetBuilder = ^HTagWidget *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+        v.tagWidgetBuilder = ^ZLRichWidget *(ZLTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
             if ([info.name isEqualToString:@"h1"]) { // 替换文字
                 return [OCDemoWidgets button:[NSString stringWithFormat:@"+ %@ #%ld", info.text, (long)info.index]];
             }
-            if ([info.name isEqualToString:@"h2"]) { return [OCDemoWidgets redDot:HTagWidgetPositionBefore]; }  // 文字前
-            if ([info.name isEqualToString:@"h3"]) { return [OCDemoWidgets vipBadge:HTagWidgetPositionAfter]; } // 文字后
+            if ([info.name isEqualToString:@"h2"]) { return [OCDemoWidgets redDot:ZLRichWidgetPositionBefore]; }  // 文字前
+            if ([info.name isEqualToString:@"h3"]) { return [OCDemoWidgets vipBadge:ZLRichWidgetPositionAfter]; } // 文字后
             return nil; // 默认文字
         };
     }];
@@ -934,7 +934,7 @@ static NSString *OCQuote(NSString *s) {
                                      @"<h1>User Agreement</h1> and <h2>Privacy Policy</h2>."
                            configure:^(ZLTagRichLabel *v) {
         v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
-        v.tagWidgetBuilder = ^HTagWidget *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+        v.tagWidgetBuilder = ^ZLRichWidget *(ZLTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
             OCDemoViewController *strongSelf = weakSelf;
             if (!strongSelf || ![info.name isEqualToString:@"h0"]) { return nil; }
             return [OCDemoWidgets checkbox:strongSelf.agreed11 target:strongSelf action:@selector(toggleAgree11)];
@@ -963,10 +963,10 @@ static NSString *OCQuote(NSString *s) {
                      NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)},
             @"h2": @{NSForegroundColorAttributeName: kDeepOrange},
         };
-        [v setTapHandler:^(HTagInfo *info) {
+        [v setTapHandler:^(ZLTagInfo *info) {
             [weakSelf onTap:name info:info action:@"h1 handler → اتفاقية المستخدم"];
         } forTag:@"h1"];
-        [v setTapHandler:^(HTagInfo *info) {
+        [v setTapHandler:^(ZLTagInfo *info) {
             [weakSelf onTap:name info:info action:@"h2 handler → سياسة الخصوصية"];
         } forTag:@"h2"];
     }];
@@ -1009,16 +1009,16 @@ static NSString *OCQuote(NSString *s) {
                   @"مميز: <h3>علي</h3>  اقرأ <h4>الاتفاقية</h4>."
         configure:^(ZLTagRichLabel *v) {
         v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
-        v.tagSpanBuilder = ^NSAttributedString *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+        v.tagSpanBuilder = ^NSAttributedString *(ZLTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
             if (![info.name isEqualToString:@"h4"]) { return nil; }
             return [OCDemoWidgets iconText:@"doc.text.fill" text:[NSString stringWithFormat:@"«%@»", info.text] style:style];
         };
-        v.tagWidgetBuilder = ^HTagWidget *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+        v.tagWidgetBuilder = ^ZLRichWidget *(ZLTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
             if ([info.name isEqualToString:@"h1"]) {
                 return [OCDemoWidgets button:[NSString stringWithFormat:@"+ %@", info.text]];
             }
-            if ([info.name isEqualToString:@"h2"]) { return [OCDemoWidgets redDot:HTagWidgetPositionBefore]; }
-            if ([info.name isEqualToString:@"h3"]) { return [OCDemoWidgets vipBadge:HTagWidgetPositionAfter]; }
+            if ([info.name isEqualToString:@"h2"]) { return [OCDemoWidgets redDot:ZLRichWidgetPositionBefore]; }
+            if ([info.name isEqualToString:@"h3"]) { return [OCDemoWidgets vipBadge:ZLRichWidgetPositionAfter]; }
             return nil;
         };
     }];
@@ -1032,7 +1032,7 @@ static NSString *OCQuote(NSString *s) {
                                      @"<h1>اتفاقية المستخدم</h1> و<h2>سياسة الخصوصية</h2>."
                            configure:^(ZLTagRichLabel *v) {
         v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
-        v.tagWidgetBuilder = ^HTagWidget *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+        v.tagWidgetBuilder = ^ZLRichWidget *(ZLTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
             OCDemoViewController *strongSelf = weakSelf;
             if (!strongSelf || ![info.name isEqualToString:@"h0"]) { return nil; }
             return [OCDemoWidgets checkbox:strongSelf.agreed16 target:strongSelf action:@selector(toggleAgree16)];
@@ -1056,30 +1056,30 @@ static NSString *OCQuote(NSString *s) {
             configure:^(ZLRichLabel *v) {
         // @提及
         [v addRuleWithName:@"mention" pattern:@"@\\w+" options:0 priority:10 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             [ctx addAttributes:@{NSForegroundColorAttributeName: kPurple,
                                  NSFontAttributeName: [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold]}];
             NSString *action = [NSString stringWithFormat:@"mention → 打开 %@ 的主页", ctx.matchedText];
-            ctx.onTap = [weakSelf ruleTapForCase:name ctx:ctx action:action];
+            ctx.onTap = [weakSelf ruleTapForCase:name action:action];
         }];
         // #话题#
         [v addRuleWithName:@"topic" pattern:@"#[^#\\s]+#" options:0 priority:10 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             [ctx addAttributes:@{NSForegroundColorAttributeName: kDeepOrange}];
             ctx.highlightStyle = @{NSBackgroundColorAttributeName: OCHex(0xFFE0B2)};
             NSString *action = [NSString stringWithFormat:@"topic → 打开话题 %@", ctx.matchedText];
-            ctx.onTap = [weakSelf ruleTapForCase:name ctx:ctx action:action];
+            ctx.onTap = [weakSelf ruleTapForCase:name action:action];
         }];
         // 链接：NSDataDetector 也是 NSRegularExpression，替换展示文字
         NSDataDetector *detector = [NSDataDetector dataDetectorWithTypes:NSTextCheckingTypeLink error:nil];
         if (detector) {
-            [v addRule:[[TagRichRule alloc] initWithName:@"link" regex:detector priority:10
-                                                 handler:^(TagRichRuleContext *ctx) {
+            [v addRule:[[ZLRichRule alloc] initWithName:@"link" regex:detector priority:10
+                                                 handler:^(ZLRichRuleContext *ctx) {
                 NSString *url = ctx.match.result.URL.absoluteString ?: ctx.matchedText;
                 [ctx setText:@"🔗网页链接" attributes:@{NSForegroundColorAttributeName: kBlue,
                                                     NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)}];
                 NSString *action = [NSString stringWithFormat:@"link → 打开 %@", url];
-                ctx.onTap = [weakSelf ruleTapForCase:name ctx:ctx action:action];
+                ctx.onTap = [weakSelf ruleTapForCase:name action:action];
             }]];
         }
     }];
@@ -1098,7 +1098,7 @@ static NSString *OCQuote(NSString *s) {
             configure:^(ZLRichLabel *v) {
         // 表情：把 [smile] 替换为图片（NSTextAttachment 会被自动转换为 View），点击图片也能响应
         [v addRuleWithName:@"emoji" pattern:@"\\[(smile|heart|star)\\]" options:0 priority:5 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             NSString *key = [ctx groupAtIndex:1];
             NSString *symbol = key ? symbols[key] : nil;
             if (!symbol) { return; }
@@ -1111,11 +1111,11 @@ static NSString *OCQuote(NSString *s) {
             [content addAttributes:@{NSForegroundColorAttributeName: colors[key] ?: kGrey}
                              range:NSMakeRange(0, content.length)];
             [ctx.attributedString setAttributedString:content];
-            ctx.onTap = [weakSelf ruleTapForCase:name ctx:ctx action:[@"emoji → " stringByAppendingString:key]];
+            ctx.onTap = [weakSelf ruleTapForCase:name action:[@"emoji → " stringByAppendingString:key]];
         }];
         // 模板变量：命名捕获组取 key，外部查值后写回
         [v addRuleWithName:@"variable" pattern:@"\\{\\{(?<key>\\w+)\\}\\}" options:0 priority:5 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             NSString *value = variables[[ctx groupNamed:@"key"] ?: @""];
             if (value) {
                 [ctx setText:value attributes:@{NSFontAttributeName: [UIFont boldSystemFontOfSize:15],
@@ -1128,7 +1128,7 @@ static NSString *OCQuote(NSString *s) {
     }];
 }
 
-/// 19. 优先级：手机号规则(20) > <h> 标签(hTagPriority) > 数字规则(1)
+/// 19. 优先级：手机号规则(20) > <h> 标签(tagPriority) > 数字规则(1)
 /// 需要和 <h> 标签比较优先级，所以这里用 ZLTagRichLabel
 - (void)case19 {
     NSString *source = @"Call <h1>13800138000</h1> or 400-123-4567, order 2024.";
@@ -1137,26 +1137,26 @@ static NSString *OCQuote(NSString *s) {
         v.tagStyle = @{NSForegroundColorAttributeName: kBlue,
                        NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)};
         [v addRuleWithName:@"phone" pattern:@"1\\d{10}" options:0 priority:20 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             [ctx addAttributes:@{NSForegroundColorAttributeName: kGreen,
                                  NSFontAttributeName: [UIFont boldSystemFontOfSize:15]}];
             NSString *action = [NSString stringWithFormat:@"phone(20) → 拨打 %@", ctx.matchedText];
-            ctx.onTap = [weakSelf ruleTapForCase:name ctx:ctx action:action];
+            ctx.onTap = [weakSelf ruleTapForCase:name action:action];
         }];
         [v addRuleWithName:@"number" pattern:@"\\d+" options:0 priority:1 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             [ctx addAttributes:@{NSBackgroundColorAttributeName: OCHex(0xE0E0E0)}];
         }];
     };
 
     NSString *nameA = @"19a. 优先级：phone(20) > h1(0) > number(1)?";
     [self addCase:nameA source:source configure:^(ZLTagRichLabel *v) {
-        v.hTagPriority = 0; // h1 与 phone 重叠，phone 优先级更高 → h1 整体作废，<h1> 原样显示
+        v.tagPriority = 0; // h1 与 phone 重叠，phone 优先级更高 → h1 整体作废，<h1> 原样显示
         configure(v, nameA);
     }];
     NSString *nameB = @"19b. 优先级：h1(100) > phone(20) > number(1)";
     [self addCase:nameB source:source configure:^(ZLTagRichLabel *v) {
-        v.hTagPriority = 100; // h1 优先，内部的手机号不再被规则处理
+        v.tagPriority = 100; // h1 优先，内部的手机号不再被规则处理
         configure(v, nameB);
     }];
 }
@@ -1168,16 +1168,16 @@ static NSString *OCQuote(NSString *s) {
             configure:^(ZLRichLabel *v) {
         // 长的 **...** 先占位（同优先级位置靠前 / 更长优先），内部的 `x` 不会再被处理
         [v addRuleWithName:@"bold" pattern:@"\\*\\*(.+?)\\*\\*" options:0 priority:0 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             [ctx setText:[ctx groupAtIndex:1] ?: @"" attributes:@{NSFontAttributeName: [UIFont boldSystemFontOfSize:15]}];
         }];
         [v addRuleWithName:@"strike" pattern:@"~~(.+?)~~" options:0 priority:0 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             [ctx setText:[ctx groupAtIndex:1] ?: @""
               attributes:@{NSStrikethroughStyleAttributeName: @(NSUnderlineStyleSingle)}];
         }];
         [v addRuleWithName:@"code" pattern:@"`([^`]+)`" options:0 priority:0 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             [ctx setText:[ctx groupAtIndex:1] ?: @"" attributes:@{
                 NSFontAttributeName: [UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightRegular],
                 NSBackgroundColorAttributeName: OCHex(0xEEEEEE),
@@ -1197,7 +1197,7 @@ static NSString *OCQuote(NSString *s) {
                   @"the following text reflows automatically."
         configure:^(ZLTagRichLabel *v) {
         v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
-        v.tagWidgetBuilder = ^HTagWidget *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+        v.tagWidgetBuilder = ^ZLRichWidget *(ZLTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
             OCDemoViewController *strongSelf = weakSelf;
             if (!strongSelf) { return nil; }
             if ([info.name isEqualToString:@"h1"]) {
@@ -1244,18 +1244,17 @@ static NSString *OCQuote(NSString *s) {
 
     __weak typeof(self) weakSelf = self;
     __weak ZLTagRichLabel *weakLabel = label;
-    [label update:^(ZLRichLabel *base) {
-        ZLTagRichLabel *v = (ZLTagRichLabel *)base;
+    [label updateTag:^(ZLTagRichLabel *v) {
         v.adjustsFontForContentSizeCategory = YES;
         // 动态颜色：深色 / 浅色切换后自动适配
         v.style = @{NSFontAttributeName: [UIFont systemFontOfSize:15],
                     NSForegroundColorAttributeName: UIColor.labelColor};
         v.tagStyle = @{NSForegroundColorAttributeName: OCDynamic(kBlue, OCHex(0x90CAF9)),
                        NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)};
-        v.onTagTap = ^(HTagInfo *info) { [weakSelf onTap:name info:info action:nil]; };
-        v.onParsed = ^(NSArray<HTagInfo *> *tags) { [weakSelf onParsed:name tags:tags]; };
+        v.onTagTap = ^(ZLTagInfo *info) { [weakSelf onTap:name info:info action:nil]; };
+        v.onParsed = ^(NSArray<ZLTagInfo *> *tags) { [weakSelf onParsed:name tags:tags]; };
         // 自定义 View：builder 在外观 / 字号变化时会重新执行，用 scaledFont: 让 View 字号一起变化
-        v.tagWidgetBuilder = ^HTagWidget *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+        v.tagWidgetBuilder = ^ZLRichWidget *(ZLTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
             ZLTagRichLabel *strongLabel = weakLabel;
             if (![info.name isEqualToString:@"h2"] || !strongLabel) { return nil; }
             OCPaddingLabel *badge = [[OCPaddingLabel alloc] initWithInsets:UIEdgeInsetsMake(1, 5, 1, 5)];
@@ -1265,15 +1264,15 @@ static NSString *OCQuote(NSString *s) {
             badge.backgroundColor = OCDynamic(kDeepOrange, OCHex(0xFF8A65));
             badge.layer.cornerRadius = 4;
             badge.layer.masksToBounds = YES;
-            return [[HTagWidget alloc] initWithView:badge
+            return [[ZLRichWidget alloc] initWithView:badge
                                                size:CGSizeZero
-                                           position:HTagWidgetPositionReplace
-                                          alignment:HTagWidgetAlignmentMiddle
+                                           position:ZLRichWidgetPositionReplace
+                                          alignment:ZLRichWidgetAlignmentMiddle
                                            tappable:YES];
         };
         // 规则 handler 也会重新执行：按当前外观返回不同内容
         [v addRuleWithName:@"mode" pattern:@"\\{mode\\}" options:0 priority:0 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             BOOL dark = weakLabel.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
             [ctx setText:dark ? @"🌙 Dark" : @"☀️ Light"
               attributes:@{NSFontAttributeName: [UIFont boldSystemFontOfSize:15],
@@ -1369,7 +1368,7 @@ static NSString *OCQuote(NSString *s) {
     __weak typeof(self) weakSelf = self;
     [self addCase:name source:source configure:^(ZLTagRichLabel *v) {
         // 识别任意标签名，支持嵌套和自闭合（默认只识别 <h> / <hN>）
-        v.tagNamePattern = HTagParser.anyTagNamePattern;
+        v.tagNamePattern = ZLTagParser.anyTagNamePattern;
         v.allowsNestedTags = YES;
         v.allowsSelfClosingTags = YES;
         v.tagStyles = @{
@@ -1379,7 +1378,7 @@ static NSString *OCQuote(NSString *s) {
             @"a": @{NSForegroundColorAttributeName: kBlue, NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)},
         };
         // 按属性设置样式：<color value="…">、<size value="…">
-        v.tagStyleBuilder = ^NSDictionary<NSAttributedStringKey, id> *(HTagInfo *info) {
+        v.tagStyleBuilder = ^NSDictionary<NSAttributedStringKey, id> *(ZLTagInfo *info) {
             NSMutableDictionary *style = [NSMutableDictionary dictionary];
             UIColor *color = [info.name isEqualToString:@"color"] ? [info colorAttributeNamed:@"value"] : nil;
             if (color) style[NSForegroundColorAttributeName] = color;
@@ -1388,26 +1387,26 @@ static NSString *OCQuote(NSString *s) {
             return style;
         };
         // 自闭合标签：<br/> 换行
-        v.tagSpanBuilder = ^NSAttributedString *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+        v.tagSpanBuilder = ^NSAttributedString *(ZLTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
             return [info.name isEqualToString:@"br"] ? [[NSAttributedString alloc] initWithString:@"\n" attributes:style] : nil;
         };
         // 自闭合标签：<icon name="…" color="…"/> 显示 SF Symbol
-        v.tagWidgetBuilder = ^HTagWidget *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+        v.tagWidgetBuilder = ^ZLRichWidget *(ZLTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
             NSString *symbol = [info attributeNamed:@"name"];
             if (![info.name isEqualToString:@"icon"] || symbol == nil) return nil;
             UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:symbol]];
             icon.tintColor = [info colorAttributeNamed:@"color"] ?: kGrey;
             icon.contentMode = UIViewContentModeScaleAspectFit;
-            return [HTagWidget widgetWithView:icon size:CGSizeMake(16, 16) position:HTagWidgetPositionReplace];
+            return [ZLRichWidget widgetWithView:icon size:CGSizeMake(16, 16) position:ZLRichWidgetPositionReplace];
         };
         // <a> 读取 href；其他标签走 onTagTap（内层标签优先响应点击）
-        [v setTapHandler:^(HTagInfo *info) {
+        [v setTapHandler:^(ZLTagInfo *info) {
             [weakSelf onTap:name info:info
                      action:[NSString stringWithFormat:@"打开 %@", [info attributeNamed:@"href"] ?: @""]];
         } forTag:@"a"];
-        v.onTagTap = ^(HTagInfo *info) {
+        v.onTagTap = ^(ZLTagInfo *info) {
             NSMutableArray<NSString *> *path = [NSMutableArray array];
-            for (HTagInfo *t = info; t != nil; t = t.parent) {
+            for (ZLTagInfo *t = info; t != nil; t = t.parent) {
                 [path insertObject:[NSString stringWithFormat:@"<%@>", t.name] atIndex:0];
             }
             [weakSelf onTap:name info:info
@@ -1436,7 +1435,7 @@ static NSString *OCQuote(NSString *s) {
         NSMutableDictionary *style = [OCDemoViewController.baseStyle mutableCopy];
         style[NSParagraphStyleAttributeName] = paragraph;
         v.style = style;
-        v.tagNamePattern = HTagParser.anyTagNamePattern;
+        v.tagNamePattern = ZLTagParser.anyTagNamePattern;
         v.allowsNestedTags = YES;
 
         ZLTextBackground *badge = [ZLTextBackground backgroundWithFillColor:kDeepOrange strokeColor:nil cornerRadius:4];
@@ -1476,21 +1475,17 @@ static NSString *OCQuote(NSString *s) {
         };
         // #话题#：胶囊 + 点击
         [v addRuleWithName:@"topic" pattern:@"#[^#\\s]+#" options:0 priority:0 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
-            NSString *topic = ctx.matchedText;   // 不要在 onTap 里强引用 ctx
+                   handler:^(ZLRichRuleContext *ctx) {
             [ctx addAttributes:@{NSForegroundColorAttributeName: kPurple,
                                  ZLRichLabel.textBackgroundAttributeName: [ZLTextBackground capsule:kPurple]}];
             ctx.highlightStyle = @{ZLRichLabel.textBackgroundAttributeName:
                                        [ZLTextBackground backgroundWithFillColor:[kPurple colorWithAlphaComponent:0.3]
                                                                      strokeColor:nil cornerRadius:-1]};
-            ctx.onTap = ^{
-                HTagInfo *info = [[HTagInfo alloc] initWithIndex:0 name:@"topic" text:topic raw:topic];
-                [weakSelf onTap:name info:info action:@"点击话题"];
-            };
+            ctx.onTap = [weakSelf ruleTapForCase:name action:@"点击话题"];
         }];
         // `代码`：去掉反引号，等宽字体 + 灰色背景 + 细边框
         [v addRuleWithName:@"code" pattern:@"`([^`]+)`" options:0 priority:0 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             [ctx setText:[ctx groupAtIndex:1] ?: @"" attributes:@{
                 NSFontAttributeName: [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular],
                 NSForegroundColorAttributeName: kDeepOrange,
@@ -1521,15 +1516,14 @@ static NSString *OCQuote(NSString *s) {
     __weak typeof(self) weakSelf = self;
     __weak ZLTagRichLabel *weakLabel = label;
     __weak UILabel *weakStatus = status;
-    [label update:^(ZLRichLabel *base) {
-        ZLTagRichLabel *v = (ZLTagRichLabel *)base;
+    [label updateTag:^(ZLTagRichLabel *v) {
         v.style = OCDemoViewController.baseStyle;
         v.isSelectable = YES;
         v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
-        v.onTagTap = ^(HTagInfo *info) { [weakSelf onTap:name info:info action:nil]; };
+        v.onTagTap = ^(ZLTagInfo *info) { [weakSelf onTap:name info:info action:nil]; };
         // 表情：选中后「复制」得到空（图片），「复制原文」得到 [smile]
         [v addRuleWithName:@"emoji" pattern:@"\\[smile\\]" options:0 priority:0 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             NSTextAttachment *attachment = [[NSTextAttachment alloc] init];
             attachment.image = [[UIImage systemImageNamed:@"face.smiling"] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
             attachment.bounds = CGRectMake(0, 0, 17, 17);
@@ -1539,7 +1533,7 @@ static NSString *OCQuote(NSString *s) {
         }];
         // @提及：展示为 👤alice，原文为 @alice（长按命中时整体选中）
         [v addRuleWithName:@"mention" pattern:@"@\\w+" options:0 priority:0 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             [ctx setText:[@"👤" stringByAppendingString:[ctx.matchedText substringFromIndex:1]]
               attributes:@{NSForegroundColorAttributeName: kPurple}];
         }];
@@ -1552,7 +1546,7 @@ static NSString *OCQuote(NSString *s) {
                 strongLabel.selectedText ?: @"", strongLabel.selectedRawText ?: @""];
         };
         v.onCopy = ^(NSString *text, BOOL isRaw) {
-            HTagInfo *info = [[HTagInfo alloc] initWithIndex:0 name:isRaw ? @"copy-raw" : @"copy" text:text raw:@""];
+            ZLTagInfo *info = [[ZLTagInfo alloc] initWithIndex:0 name:isRaw ? @"copy-raw" : @"copy" text:text raw:@""];
             [weakSelf onTap:name info:info action:isRaw ? @"onCopy → 复制原文" : @"onCopy → 复制展示文字"];
         };
         v.text = source;
@@ -1587,15 +1581,16 @@ static NSString *OCQuote(NSString *s) {
 
         // 规则命中自己的长按：只回调它，不再回调 onLongPress
         [v addRuleWithName:@"mention" pattern:@"@\\w+" options:0 priority:0 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             [ctx addAttributes:@{NSForegroundColorAttributeName: kPurple,
                                  NSFontAttributeName: [UIFont boldSystemFontOfSize:15]}];
-            NSString *user = ctx.matchedText;
-            HTagInfo *info = [[HTagInfo alloc] initWithIndex:ctx.match.index name:@"rule:mention" text:user raw:user];
-            ctx.onTap = ^{
-                [weakSelf onTap:name info:info action:[NSString stringWithFormat:@"mention onTap → 打开 %@ 的主页", user]];
+            ctx.onTap = ^(ZLRichMatch *match) {
+                [weakSelf onTap:name info:[OCDemoViewController infoForMatch:match]
+                         action:[NSString stringWithFormat:@"mention onTap → 打开 %@ 的主页", match.text]];
             };
-            ctx.onLongPress = ^{
+            ctx.onLongPress = ^(ZLRichMatch *match) {
+                NSString *user = match.text;
+                ZLTagInfo *info = [OCDemoViewController infoForMatch:match];
                 [weakSelf showMenu25:user items:@[
                     @[[NSString stringWithFormat:@"复制 %@", user], ^{ [weakSelf copy25:user caseName:name info:info]; }],
                     @[[NSString stringWithFormat:@"举报 %@", user], ^{
@@ -1605,14 +1600,14 @@ static NSString *OCQuote(NSString *s) {
             };
         }];
         // 标签的长按
-        v.onTagLongPress = ^(HTagInfo *info) {
+        v.onTagLongPress = ^(ZLTagInfo *info) {
             [weakSelf showMenu25:[NSString stringWithFormat:@"<%@> %@", info.name, info.text] items:@[
                 @[[NSString stringWithFormat:@"复制「%@」", info.text], ^{ [weakSelf copy25:info.text caseName:name info:info]; }],
             ]];
         };
         // 其他位置的长按：复制原文 / 展示文字、举报
         v.onLongPress = ^(ZLRichGestureInfo *gesture) {
-            HTagInfo *info = [[HTagInfo alloc] initWithIndex:gesture.characterIndex name:@"long-press"
+            ZLTagInfo *info = [[ZLTagInfo alloc] initWithIndex:gesture.characterIndex name:@"long-press"
                                                         text:gesture.displayText raw:gesture.rawText];
             [weakSelf showMenu25:[NSString stringWithFormat:@"长按位置字符下标：%ld", (long)gesture.characterIndex] items:@[
                 @[@"复制原文（rawText）", ^{ [weakSelf copy25:gesture.rawText caseName:name info:info]; }],
@@ -1625,7 +1620,7 @@ static NSString *OCQuote(NSString *s) {
             OCDemoViewController *strongSelf = weakSelf;
             ZLTagRichLabel *label = strongSelf.case25Label;
             if (!strongSelf || !label) { return; }
-            HTagInfo *info = [[HTagInfo alloc] initWithIndex:gesture.characterIndex name:@"double-tap"
+            ZLTagInfo *info = [[ZLTagInfo alloc] initWithIndex:gesture.characterIndex name:@"double-tap"
                                                         text:gesture.matchDisplayText ?: @"" raw:gesture.match.text ?: @""];
             [strongSelf onTap:name info:info action:[NSString stringWithFormat:@"onDoubleTap → 点赞 ❤️（位置 %d, %d）",
                                                      (int)gesture.location.x, (int)gesture.location.y]];
@@ -1652,7 +1647,7 @@ static NSString *OCQuote(NSString *s) {
     [self presentViewController:sheet animated:YES completion:nil];
 }
 
-- (void)copy25:(NSString *)text caseName:(NSString *)caseName info:(HTagInfo *)info {
+- (void)copy25:(NSString *)text caseName:(NSString *)caseName info:(ZLTagInfo *)info {
     UIPasteboard.generalPasteboard.string = text;
     NSString *shown = text.length > 40 ? [[text substringToIndex:40] stringByAppendingString:@"…"] : text;
     [self onTap:caseName info:info action:[NSString stringWithFormat:@"已复制：%@", shown]];
@@ -1697,7 +1692,7 @@ static NSString *OCQuote(NSString *s) {
             v.onExpandChanged = ^(BOOL expanded) {
                 OCDemoViewController *strongSelf = weakSelf;
                 if (!strongSelf) { return; }
-                HTagInfo *info = [[HTagInfo alloc] initWithIndex:0 name:@"expand" text:expanded ? @"全文" : @"收起" raw:@""];
+                ZLTagInfo *info = [[ZLTagInfo alloc] initWithIndex:0 name:@"expand" text:expanded ? @"全文" : @"收起" raw:@""];
                 [strongSelf onTap:title info:info action:[NSString stringWithFormat:@"onExpandChanged(%@)", expanded ? @"YES" : @"NO"]];
                 [UIView animateWithDuration:0.25 animations:^{ [strongSelf.view layoutIfNeeded]; }];
             };
@@ -1729,13 +1724,13 @@ static NSString *OCQuote(NSString *s) {
         v.style = OCDemoViewController.baseStyle;
         v.highlightStyle = @{NSBackgroundColorAttributeName: [kAmber colorWithAlphaComponent:0.4]};
         [v addRuleWithName:@"mention" pattern:@"@\\w+" options:0 priority:0 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             BOOL green = weakSelf.mentionGreen23;
             [ctx addAttributes:@{NSForegroundColorAttributeName: green ? kGreen : kPurple}];
-            ctx.onTap = [weakSelf ruleTapForCase:name ctx:ctx action:@"rule onTap"];
+            ctx.onTap = [weakSelf ruleTapForCase:name action:@"rule onTap"];
         }];
         [v addRuleWithName:@"emoji" pattern:@"\\[smile\\]" options:0 priority:0 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             NSTextAttachment *attachment = [[NSTextAttachment alloc] init];
             attachment.image = [[UIImage systemImageNamed:@"face.smiling"] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
             attachment.bounds = CGRectMake(0, 0, 16, 16);
@@ -1743,7 +1738,7 @@ static NSString *OCQuote(NSString *s) {
             [ctx addAttributes:@{NSForegroundColorAttributeName: kOrange}];
         }];
         [v addRuleWithName:@"topic" pattern:@"#\\w+#" options:0 priority:0 error:nil
-                   handler:^(TagRichRuleContext *ctx) {
+                   handler:^(ZLRichRuleContext *ctx) {
             [ctx addAttributes:@{NSForegroundColorAttributeName: kBlue}];
         }];
     }];
@@ -1849,7 +1844,7 @@ static NSString *OCQuote(NSString *s) {
     ZLRichLabel *label = self.case23Label;
     [self measure23:@"sizeThatFits ×100" block:^{
         CGSize fitting = CGSizeMake(CGRectGetWidth(label.bounds), CGFLOAT_MAX);
-        for (NSInteger i = 0; i < 100; i++) { [label sizeThatFits:fitting]; }
+        for (NSInteger i = 0; i < 100; i++) { (void)[label sizeThatFits:fitting]; }
     }];
 }
 
@@ -1857,17 +1852,17 @@ static NSString *OCQuote(NSString *s) {
 - (void)parse23 {
     NSMutableString *text = [NSMutableString string];
     for (NSInteger i = 0; i < 5000; i++) { [text appendString:@"@user #tag# word "]; }
-    void (^noop)(TagRichRuleContext *) = ^(TagRichRuleContext *ctx) {};
-    NSArray<TagRichRule *> *rules = @[
-        [[TagRichRule alloc] initWithName:@"mention" pattern:@"@\\w+" options:0 priority:0 error:nil handler:noop],
-        [[TagRichRule alloc] initWithName:@"topic" pattern:@"#\\w+#" options:0 priority:0 error:nil handler:noop],
-        [[TagRichRule alloc] initWithName:@"word" pattern:@"\\w+" options:0 priority:-1 error:nil handler:noop],
+    void (^noop)(ZLRichRuleContext *) = ^(ZLRichRuleContext *ctx) {};
+    NSArray<ZLRichRule *> *rules = @[
+        [[ZLRichRule alloc] initWithName:@"mention" pattern:@"@\\w+" options:0 priority:0 error:nil handler:noop],
+        [[ZLRichRule alloc] initWithName:@"topic" pattern:@"#\\w+#" options:0 priority:0 error:nil handler:noop],
+        [[ZLRichRule alloc] initWithName:@"word" pattern:@"\\w+" options:0 priority:-1 error:nil handler:noop],
     ];
     CFTimeInterval start = CACurrentMediaTime();
-    NSArray<TagRichMatch *> *matches = [TagRichParser matchesInString:text rules:rules];
+    NSArray<ZLRichMatch *> *matches = [ZLRichParser matchesInString:text rules:rules];
     double ms = (CACurrentMediaTime() - start) * 1000;
     self.case23Stats.text = [NSString stringWithFormat:
-        @"TagRichParser.resolve：%.2f ms\n文本 %lu 字符，3 条规则，生效命中 %lu 个\n（含正则匹配耗时；label 未参与）",
+        @"ZLRichParser.resolve：%.2f ms\n文本 %lu 字符，3 条规则，生效命中 %lu 个\n（含正则匹配耗时；label 未参与）",
         ms, (unsigned long)text.length, (unsigned long)matches.count];
 }
 

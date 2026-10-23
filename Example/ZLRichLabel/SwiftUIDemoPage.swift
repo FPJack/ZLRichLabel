@@ -83,7 +83,7 @@ private struct DemoSection<Content: View>: View {
     }
 }
 
-private let demoStyle: HTagTextStyle = [.font: UIFont.systemFont(ofSize: 15), .foregroundColor: UIColor.label]
+private let demoStyle: ZLTextStyle = [.font: UIFont.systemFont(ofSize: 15), .foregroundColor: UIColor.label]
 
 // MARK: - 1. 基础用法
 
@@ -201,16 +201,14 @@ private struct DecorationDemo: View {
             label.tagStyles = ["grad": [.font: UIFont.boldSystemFont(ofSize: 20),
                                         .zlGradient: ZLTextGradient(colors: [.systemPink, .systemOrange, .systemPurple])]]
             try? label.addRule(name: "topic", pattern: "#[^#\\s]+#") { ctx in
-                let topic = ctx.matchedText
                 ctx.addAttributes([.foregroundColor: UIColor.systemPurple,
                                    .zlBackground: ZLTextBackground.capsule(.systemPurple)])
                 ctx.highlightStyle = [.zlBackground: ZLTextBackground(fillColor: UIColor.systemPurple.withAlphaComponent(0.3))]
-                ctx.onTap = { onEvent("话题 \(topic)") }
+                ctx.onTap = { match in onEvent("话题 \(match.text)") }
             }
             try? label.addRule(name: "mention", pattern: "@\\w+") { ctx in
-                let user = ctx.matchedText
-                ctx.setText("👤" + user.dropFirst(), attributes: [.foregroundColor: UIColor.systemIndigo])
-                ctx.onTap = { onEvent("提及 \(user)") }
+                ctx.setText("👤" + ctx.matchedText.dropFirst(), attributes: [.foregroundColor: UIColor.systemIndigo])
+                ctx.onTap = { match in onEvent("提及 \(match.text)") }
             }
             try? label.addRule(name: "code", pattern: "`([^`]+)`") { ctx in
                 ctx.setText(ctx.group(1) ?? "", attributes: [

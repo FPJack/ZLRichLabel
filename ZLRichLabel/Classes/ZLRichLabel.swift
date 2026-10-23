@@ -3,7 +3,7 @@
 //  ZLRichLabel
 //
 //  富文本基类（基于 TTTAttributedLabel）：
-//  - 基于正则规则（`TagRichRule`）解析文本，重叠时按优先级取舍
+//  - 基于正则规则（`ZLRichRule`）解析文本，重叠时按优先级取舍
 //  - 命中内容交给规则 handler 渲染（样式 / 替换文字 / 图片 / 自定义 View / 点击 / 按下高亮）
 //  - 负责渲染、内嵌 View 布局、截断、Auto Layout 自适应高度、RTL
 //
@@ -22,9 +22,9 @@ public final class ZLRichSegment: NSObject {
     /// 原始文字
     public let text: String
     /// 规则命中，普通文本为 nil
-    public let match: TagRichMatch?
+    public let match: ZLRichMatch?
 
-    public init(text: String, match: TagRichMatch?) {
+    public init(text: String, match: ZLRichMatch?) {
         self.text = text
         self.match = match
         super.init()
@@ -43,7 +43,7 @@ public final class ZLRichSegment: NSObject {
 /// label.style = [.font: UIFont.systemFont(ofSize: 14), .foregroundColor: UIColor.gray]
 /// try? label.addRule(name: "mention", pattern: "@\\w+", priority: 10) { ctx in
 ///     ctx.addAttributes([.foregroundColor: UIColor.purple])
-///     ctx.onTap = { print("@", ctx.matchedText) }
+///     ctx.onTap = { match in print("@", match.text) }
 /// }
 /// label.text = "hello @alice"
 /// ```
@@ -55,7 +55,7 @@ public final class ZLRichGestureInfo: NSObject {
     /// 手势位置对应的字符下标（展示文字中），不在文字上时为 `NSNotFound`
     public let characterIndex: Int
     /// 手势位置所在的规则命中，不在命中上时为 nil
-    public let match: TagRichMatch?
+    public let match: ZLRichMatch?
     /// 命中在 label 上展示的文字（规则可能替换过文字），不在命中上时为 nil
     public let matchDisplayText: String?
     /// 原始字符串（`rawText`）
@@ -63,7 +63,7 @@ public final class ZLRichGestureInfo: NSObject {
     /// 展示文字（渲染后的文字，自定义 View / 图片为占位符 U+FFFC）
     public let displayText: String
 
-    init(location: CGPoint, characterIndex: Int, match: TagRichMatch?, matchDisplayText: String?,
+    init(location: CGPoint, characterIndex: Int, match: ZLRichMatch?, matchDisplayText: String?,
          rawText: String, displayText: String) {
         self.location = location
         self.characterIndex = characterIndex
@@ -161,10 +161,10 @@ open class ZLRichLabel: TTTAttributedLabel {
     private var isPassingThrough = false
 
     /// 普通文本样式（未设置 font / foregroundColor 时使用 label 的 font / textColor）
-    open var style: HTagTextStyle = [:] { didSet { setNeedsRebuild() } }
+    open var style: ZLTextStyle = [:] { didSet { setNeedsRebuild() } }
 
     /// 可点击内容按下时的默认高亮样式（为空则不高亮），规则可通过 `context.highlightStyle` 单独指定
-    open var highlightStyle: HTagTextStyle = [:] { didSet { setNeedsRender() } }
+    open var highlightStyle: ZLTextStyle = [:] { didSet { setNeedsRender() } }
 
     /// 截断时使用的省略符，nil 时使用 "…"（带普通文本样式）
     open var truncationToken: NSAttributedString? { didSet { setNeedsRender() } }
@@ -281,18 +281,18 @@ open class ZLRichLabel: TTTAttributedLabel {
 
     // MARK: 规则
 
-    /// 外部添加的规则（命中内容交给规则 handler 处理），重叠时按优先级取舍，见 `TagRichRule`
-    open var rules: [TagRichRule] = [] { didSet { setNeedsReparse() } }
+    /// 外部添加的规则（命中内容交给规则 handler 处理），重叠时按优先级取舍，见 `ZLRichRule`
+    open var rules: [ZLRichRule] = [] { didSet { setNeedsReparse() } }
 
     /// 子类内置规则（默认为空）。同优先级时排在 `rules` 之前。
     /// 内置规则的配置变化后，子类需要调用 `setNeedsReparse()`
-    open var builtInRules: [TagRichRule] { return [] }
+    open var builtInRules: [ZLRichRule] { return [] }
 
     /// 实际参与解析的所有规则：`builtInRules + rules`
-    public var allRules: [TagRichRule] { return builtInRules + rules }
+    public var allRules: [ZLRichRule] { return builtInRules + rules }
 
     /// 添加规则（同名规则会被替换）
-    open func addRule(_ rule: TagRichRule) {
+    open func addRule(_ rule: ZLRichRule) {
         if let i = rules.firstIndex(where: { $0.name == rule.name }) {
             rules[i] = rule
         } else {
@@ -302,8 +302,8 @@ open class ZLRichLabel: TTTAttributedLabel {
 
     /// 便捷添加规则：正则非法时抛出错误
     open func addRule(name: String, pattern: String, options: NSRegularExpression.Options = [], priority: Int = 0,
-                      handler: @escaping (TagRichRuleContext) -> Void) throws {
-        addRule(try TagRichRule(name: name, pattern: pattern, options: options, priority: priority, handler: handler))
+                      handler: @escaping (ZLRichRuleContext) -> Void) throws {
+        addRule(try ZLRichRule(name: name, pattern: pattern, options: options, priority: priority, handler: handler))
     }
 
     /// 按名称移除规则（Objective-C：`[label removeRuleNamed:@"mention"]`）
@@ -321,7 +321,7 @@ open class ZLRichLabel: TTTAttributedLabel {
     public private(set) var segments: [ZLRichSegment] = []
 
     /// 当前所有生效的规则命中（含内置规则），按位置排序
-    public var matches: [TagRichMatch] { return segments.compactMap { $0.match } }
+    public var matches: [ZLRichMatch] { return segments.compactMap { $0.match } }
 
     // MARK: Private
 
@@ -331,12 +331,12 @@ open class ZLRichLabel: TTTAttributedLabel {
     private final class Attachment {
         let id: Int
         let view: UIView
-        let alignment: HTagWidgetAlignment
+        let alignment: ZLRichWidgetAlignment
         /// 所在位置的字体（用于按对齐方式计算 ascent / descent）
         var font: UIFont
         /// 创建时的字体（Dynamic Type 每次渲染都从它重新缩放，避免复用时重复缩放）
         let originalFont: UIFont
-        /// `HTagWidget.size == .zero`：尺寸由 View 自身计算，内容变化后可重新测量
+        /// `ZLRichWidget.size == .zero`：尺寸由 View 自身计算，内容变化后可重新测量
         let autoSize: Bool
         /// 是否给 View 加点击（触发所在范围的 onTap）
         var tappable = true
@@ -346,7 +346,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         /// 最近一次布局时设置给 View 的尺寸，用于检测外部修改了 View 的尺寸
         var appliedSize: CGSize?
 
-        init(id: Int, view: UIView, alignment: HTagWidgetAlignment, font: UIFont, autoSize: Bool, size: CGSize) {
+        init(id: Int, view: UIView, alignment: ZLRichWidgetAlignment, font: UIFont, autoSize: Bool, size: CGSize) {
             self.id = id
             self.view = view
             self.alignment = alignment
@@ -403,20 +403,20 @@ open class ZLRichLabel: TTTAttributedLabel {
 
     /// 单个命中的渲染结果（handler / builder 的输出 + 创建的 View），下次渲染时直接复用
     private final class RenderedMatch {
-        let rule: TagRichRule
+        let rule: ZLRichRule
         let range: NSRange
         let index: Int
         let text: String
         let content: NSAttributedString
-        let onTap: (() -> Void)?
-        let onLongPress: (() -> Void)?
-        let highlightStyle: HTagTextStyle?
+        let onTap: ((ZLRichMatch) -> Void)?
+        let onLongPress: ((ZLRichMatch) -> Void)?
+        let highlightStyle: ZLTextStyle?
         let attachments: [Attachment]
         /// 分段点击 / 长按（范围相对 content，后面的优先）
         let links: [ZLRuleLink]
 
-        init(match: TagRichMatch, content: NSAttributedString, onTap: (() -> Void)?, onLongPress: (() -> Void)?,
-             highlightStyle: HTagTextStyle?, attachments: [Attachment], links: [ZLRuleLink]) {
+        init(match: ZLRichMatch, content: NSAttributedString, onTap: ((ZLRichMatch) -> Void)?, onLongPress: ((ZLRichMatch) -> Void)?,
+             highlightStyle: ZLTextStyle?, attachments: [Attachment], links: [ZLRuleLink]) {
             self.matchInfo = match
             self.rule = match.rule
             self.range = match.range
@@ -431,10 +431,10 @@ open class ZLRichLabel: TTTAttributedLabel {
         }
 
         /// 生成这份结果的命中（复用时规则 / 位置 / 序号 / 文字都相同）
-        let matchInfo: TagRichMatch
+        let matchInfo: ZLRichMatch
 
         /// 同一条规则、同一位置、同一序号、同样的文字才能复用
-        func isValid(for match: TagRichMatch) -> Bool {
+        func isValid(for match: ZLRichMatch) -> Bool {
             return rule === match.rule && index == match.index && NSEqualRanges(range, match.range) && text == match.text
         }
     }
@@ -631,7 +631,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         let ns = source as NSString
         var result: [ZLRichSegment] = []
         var cursor = 0
-        for match in TagRichParser.resolve(source, rules: allRules) {
+        for match in ZLRichParser.resolve(source, rules: allRules) {
             if match.range.location > cursor {
                 let text = ns.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
                 result.append(ZLRichSegment(text: text, match: nil))
@@ -680,8 +680,8 @@ open class ZLRichLabel: TTTAttributedLabel {
     }
 
     /// 普通文本样式：label 的 font / textColor + `style`
-    public var resolvedBaseStyle: HTagTextStyle {
-        var baseStyle: HTagTextStyle = [:]
+    public var resolvedBaseStyle: ZLTextStyle {
+        var baseStyle: ZLTextStyle = [:]
         if let font = configuredFont ?? font { baseStyle[.font] = font }
         if let color = textColor { baseStyle[.foregroundColor] = color }
         baseStyle.merge(style) { $1 }
@@ -712,7 +712,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         let previousAttachments = attachments
         let result = NSMutableAttributedString()
         /// (范围, 按下高亮样式, 点击)
-        var linkItems: [(NSRange, HTagTextStyle?, () -> Void)] = []
+        var linkItems: [(NSRange, ZLTextStyle?, () -> Void)] = []
         var nextCache: [RenderKey: RenderedMatch] = [:]
         var live: [Int: Attachment] = [:]
         var nextDisplayMatches: [(range: NSRange, rendered: RenderedMatch)] = []
@@ -745,13 +745,14 @@ open class ZLRichLabel: TTTAttributedLabel {
             if range.length > 0 { nextDisplayMatches.append((range, rendered)) }
             pieces.append(ZLDisplayPiece(display: range, raw: match.range, isMatch: true))
             rawCursor = NSMaxRange(match.range)
+            // 点击时把本次解析的命中传给回调
             if let onTap = rendered.onTap, range.length > 0 {
-                linkItems.append((range, rendered.highlightStyle, onTap))
+                linkItems.append((range, rendered.highlightStyle, { onTap(match) }))
             }
             for link in rendered.links {
                 guard let onTap = link.onTap else { continue }
                 linkItems.append((NSRange(location: range.location + link.range.location, length: link.range.length),
-                                  link.highlightStyle, onTap))
+                                  link.highlightStyle, { onTap(match) }))
             }
         }
         renderCache = nextCache
@@ -839,10 +840,10 @@ open class ZLRichLabel: TTTAttributedLabel {
     }
 
     /// 执行规则 handler，生成单个命中的渲染结果
-    private func renderMatch(_ match: TagRichMatch, baseStyle: HTagTextStyle) -> RenderedMatch {
+    private func renderMatch(_ match: ZLRichMatch, baseStyle: ZLTextStyle) -> RenderedMatch {
         // 本次创建的 View 的 id 都 >= firstId（id 只增不减，复用的 View 不会冲突）
         let firstId = nextAttachmentId
-        let context = TagRichRuleContext(match: match, baseStyle: baseStyle) { [unowned self] widget, style in
+        let context = ZLRichRuleContext(match: match, baseStyle: baseStyle) { [unowned self] widget, style in
             let attachment = self.makeAttachment(widget: widget, style: style)
             return self.makeAttachmentString(attachment, style: style)
         }
@@ -865,7 +866,7 @@ open class ZLRichLabel: TTTAttributedLabel {
                 let link = locations[attachment.id].flatMap { location in
                     context.links.last { $0.onTap != nil && NSLocationInRange(location, $0.range) }
                 }
-                if let action = link?.onTap ?? onTap { addTap(to: attachment.view, action: action) }
+                if let action = link?.onTap ?? onTap { addTap(to: attachment.view, action: { action(match) }) }
             }
         }
         return RenderedMatch(match: match,
@@ -885,7 +886,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         return (fits.width > 0 && fits.height > 0) ? fits : view.bounds.size
     }
 
-    private func makeAttachment(widget: HTagWidget, style: HTagTextStyle) -> Attachment {
+    private func makeAttachment(widget: ZLRichWidget, style: ZLTextStyle) -> Attachment {
         let view = widget.view
         let autoSize = widget.size == .zero
         let size = autoSize ? ZLRichLabel.measure(view) : widget.size
@@ -911,7 +912,7 @@ open class ZLRichLabel: TTTAttributedLabel {
 
     private static let runDelegateKey = NSAttributedString.Key(kCTRunDelegateAttributeName as String)
 
-    private func makeAttachmentString(_ attachment: Attachment, style: HTagTextStyle) -> NSAttributedString {
+    private func makeAttachmentString(_ attachment: Attachment, style: ZLTextStyle) -> NSAttributedString {
         guard let delegate = makeRunDelegate(attachment) else { return NSAttributedString() }
         var attrs = style
         attrs[.foregroundColor] = UIColor.clear
@@ -953,7 +954,7 @@ open class ZLRichLabel: TTTAttributedLabel {
     /// 自定义 View 的尺寸 / 内容变化后，刷新排版（不会重新执行规则 handler / builder）。
     ///
     /// - 外部修改了 View 的 frame / bounds 尺寸：使用新尺寸
-    /// - `HTagWidget.size` 为 `.zero`（自动尺寸）且尺寸没被外部修改：重新测量（适用于 View 内容变化，如 UILabel 换了文字）
+    /// - `ZLRichWidget.size` 为 `.zero`（自动尺寸）且尺寸没被外部修改：重新测量（适用于 View 内容变化，如 UILabel 换了文字）
     ///
     /// 直接修改 View 的 frame 尺寸时 label 下次布局会自动检测并刷新，一般无需调用；
     /// 也可以在 View 内部调用 `zl_setNeedsRichLabelLayout()`
@@ -1028,7 +1029,7 @@ open class ZLRichLabel: TTTAttributedLabel {
 
     /// 把内容中的 NSTextAttachment（图片）转换为 UIImageView 占位
     private func convertTextAttachments(in string: NSAttributedString,
-                                        style: HTagTextStyle,
+                                        style: ZLTextStyle,
                                         tapAction: (() -> Void)?) -> NSAttributedString {
         var found: [(NSRange, NSTextAttachment)] = []
         string.enumerateAttribute(.attachment, in: NSRange(location: 0, length: string.length), options: []) { value, range, _ in
@@ -1053,7 +1054,7 @@ open class ZLRichLabel: TTTAttributedLabel {
             mutable.attributes(at: range.location, effectiveRange: nil).forEach { attrs[$0.key] = $0.value }
             attrs[.attachment] = nil
 
-            let widget = HTagWidget(view: imageView, size: size, position: .replace, alignment: .middle, tappable: true)
+            let widget = ZLRichWidget(view: imageView, size: size, position: .replace, alignment: .middle, tappable: true)
             let attachment = makeAttachment(widget: widget, style: attrs)
             if let tapAction = tapAction { addTap(to: imageView, action: tapAction) }
             mutable.replaceCharacters(in: range, with: makeAttachmentString(attachment, style: attrs))
@@ -1292,7 +1293,7 @@ open class ZLRichLabel: TTTAttributedLabel {
     private static let expandTokenKey = NSAttributedString.Key("ZLRichLabelExpandToken")
 
     /// 按钮富文本：先铺普通文本样式，再覆盖按钮自己的属性
-    private static func styledToken(_ token: NSAttributedString, baseStyle: HTagTextStyle) -> NSMutableAttributedString {
+    private static func styledToken(_ token: NSAttributedString, baseStyle: ZLTextStyle) -> NSMutableAttributedString {
         let styled = NSMutableAttributedString(string: token.string, attributes: baseStyle)
         token.enumerateAttributes(in: NSRange(location: 0, length: token.length), options: []) { attrs, range, _ in
             styled.addAttributes(attrs, range: range)
@@ -1386,11 +1387,13 @@ open class ZLRichLabel: TTTAttributedLabel {
         let index = characterIndex(at: point)
         if index != NSNotFound {
             let offset = index - item.range.location
-            if let link = item.rendered.links.last(where: { $0.onLongPress != nil && NSLocationInRange(offset, $0.range) }) {
-                return link.onLongPress
+            if let link = item.rendered.links.last(where: { $0.onLongPress != nil && NSLocationInRange(offset, $0.range) }),
+               let handler = link.onLongPress {
+                return { handler(item.rendered.matchInfo) }
             }
         }
-        return item.rendered.onLongPress
+        guard let handler = item.rendered.onLongPress else { return nil }
+        return { handler(item.rendered.matchInfo) }
     }
 
     // MARK: UIResponder（选中复制菜单）
@@ -1444,7 +1447,7 @@ open class ZLRichLabel: TTTAttributedLabel {
     /// 某个位置所在的规则命中，不在命中上时为 nil。
     /// `extendsLinkTouchArea` 为 true 时，可交互的命中（有 onTap / onLongPress）点击区域向四周扩大最多 15pt
     @objc(matchAtPoint:)
-    open func match(at point: CGPoint) -> TagRichMatch? {
+    open func match(at point: CGPoint) -> ZLRichMatch? {
         return displayMatch(at: point)?.rendered.matchInfo
     }
 

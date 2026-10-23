@@ -20,7 +20,7 @@ class AttachmentResizeTests: XCTestCase {
     }
 
     /// 创建 label：`[box]` 替换为传入的 View；`@x` 为可点击规则（用于验证链接不丢失）
-    private func makeLabel(widget: @escaping () -> HTagWidget) -> ZLRichLabel {
+    private func makeLabel(widget: @escaping () -> ZLRichWidget) -> ZLRichLabel {
         let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: 200, height: 0))
         label.numberOfLines = 0
         label.update { v in
@@ -29,7 +29,7 @@ class AttachmentResizeTests: XCTestCase {
                 ctx.attributedString.setAttributedString(ctx.attachmentString(for: widget()))
             }
             try? v.addRule(name: "mention", pattern: "@x") { ctx in
-                ctx.onTap = {}
+                ctx.onTap = { _ in }
             }
             v.text = "Hello [box] world, some words @x"
         }
@@ -47,7 +47,7 @@ class AttachmentResizeTests: XCTestCase {
     /// 外部直接修改 View 的 frame 尺寸：label 下次布局自动刷新
     func testExternalFrameChangeReflows() {
         let box = UIView()
-        let label = makeLabel { HTagWidget(view: box, size: CGSize(width: 20, height: 14)) }
+        let label = makeLabel { ZLRichWidget(view: box, size: CGSize(width: 20, height: 14)) }
         XCTAssertEqual(box.frame.size, CGSize(width: 20, height: 14))
         let heightBefore = label.sizeThatFits(CGSize(width: 200, height: CGFloat.greatestFiniteMagnitude)).height
         let linksBefore = label.links.count
@@ -71,7 +71,7 @@ class AttachmentResizeTests: XCTestCase {
         let badge = UILabel()
         badge.font = .systemFont(ofSize: 12)
         badge.text = "1"
-        let label = makeLabel { HTagWidget(view: badge) }   // size == .zero 自动计算
+        let label = makeLabel { ZLRichWidget(view: badge) }   // size == .zero 自动计算
         let widthBefore = badge.bounds.width
         XCTAssertGreaterThan(widthBefore, 0)
 
@@ -89,7 +89,7 @@ class AttachmentResizeTests: XCTestCase {
         let container = UIView()
         let inner = UIView()
         container.addSubview(inner)
-        let label = makeLabel { HTagWidget(view: container, size: CGSize(width: 20, height: 14)) }
+        let label = makeLabel { ZLRichWidget(view: container, size: CGSize(width: 20, height: 14)) }
 
         container.bounds.size = CGSize(width: 60, height: 14)
         inner.zl_setNeedsRichLabelLayout()
@@ -101,7 +101,7 @@ class AttachmentResizeTests: XCTestCase {
     /// 固定尺寸且未被外部修改：invalidate 不改变尺寸
     func testFixedSizeUnchangedWithoutExternalChange() {
         let box = UIView()
-        let label = makeLabel { HTagWidget(view: box, size: CGSize(width: 20, height: 14)) }
+        let label = makeLabel { ZLRichWidget(view: box, size: CGSize(width: 20, height: 14)) }
         label.invalidateAttachmentLayout()
         label.layoutIfNeeded()
         XCTAssertEqual(box.frame.size, CGSize(width: 20, height: 14))
@@ -183,29 +183,29 @@ class PerformanceCacheTests: XCTestCase {
 
     // MARK: 解析器
 
-    private func rule(_ name: String, _ pattern: String, priority: Int = 0) -> TagRichRule {
-        return try! TagRichRule(name: name, pattern: pattern, priority: priority) { _ in }
+    private func rule(_ name: String, _ pattern: String, priority: Int = 0) -> ZLRichRule {
+        return try! ZLRichRule(name: name, pattern: pattern, priority: priority) { _ in }
     }
 
-    private func describe(_ matches: [TagRichMatch]) -> [String] {
+    private func describe(_ matches: [ZLRichMatch]) -> [String] {
         return matches.map { "\($0.rule.name):\($0.text)" }
     }
 
     func testParserResolvesOverlapsByPriority() {
         let text = "aa @bob #topic @bob# bb"
         // 同优先级：位置靠前优先
-        XCTAssertEqual(describe(TagRichParser.resolve(text, rules: [rule("m", "@\\w+"), rule("t", "#[^#]+#")])),
+        XCTAssertEqual(describe(ZLRichParser.resolve(text, rules: [rule("m", "@\\w+"), rule("t", "#[^#]+#")])),
                        ["m:@bob", "t:#topic @bob#"])
         // 优先级高的先占位，被它覆盖的低优先级命中作废
-        XCTAssertEqual(describe(TagRichParser.resolve(text, rules: [rule("m", "@\\w+", priority: 10), rule("t", "#[^#]+#")])),
+        XCTAssertEqual(describe(ZLRichParser.resolve(text, rules: [rule("m", "@\\w+", priority: 10), rule("t", "#[^#]+#")])),
                        ["m:@bob", "m:@bob"])
         // 同位置：更长的优先；再相同：先添加的优先
-        XCTAssertEqual(describe(TagRichParser.resolve("abcd", rules: [rule("s", "ab"), rule("l", "abc")])), ["l:abc"])
-        XCTAssertEqual(describe(TagRichParser.resolve("abcd", rules: [rule("x", "ab"), rule("y", "ab")])), ["x:ab"])
+        XCTAssertEqual(describe(ZLRichParser.resolve("abcd", rules: [rule("s", "ab"), rule("l", "abc")])), ["l:abc"])
+        XCTAssertEqual(describe(ZLRichParser.resolve("abcd", rules: [rule("x", "ab"), rule("y", "ab")])), ["x:ab"])
         // 相邻不算重叠
-        XCTAssertEqual(describe(TagRichParser.resolve("abcd", rules: [rule("a", "ab"), rule("c", "cd")])), ["a:ab", "c:cd"])
+        XCTAssertEqual(describe(ZLRichParser.resolve("abcd", rules: [rule("a", "ab"), rule("c", "cd")])), ["a:ab", "c:cd"])
         // 结果按位置排序，index 连续
-        let matches = TagRichParser.resolve("x1 y2 x3", rules: [rule("y", "y\\d", priority: 5), rule("x", "x\\d")])
+        let matches = ZLRichParser.resolve("x1 y2 x3", rules: [rule("y", "y\\d", priority: 5), rule("x", "x\\d")])
         XCTAssertEqual(describe(matches), ["x:x1", "y:y2", "x:x3"])
         XCTAssertEqual(matches.map { $0.index }, [0, 1, 2])
     }
@@ -214,7 +214,7 @@ class PerformanceCacheTests: XCTestCase {
         let text = String(repeating: "@user #tag# word ", count: 5000)
         let rules = [rule("m", "@\\w+"), rule("t", "#\\w+#"), rule("w", "\\w+", priority: -1)]
         let start = CFAbsoluteTimeGetCurrent()
-        let matches = TagRichParser.resolve(text, rules: rules)
+        let matches = ZLRichParser.resolve(text, rules: rules)
         let elapsed = CFAbsoluteTimeGetCurrent() - start
         XCTAssertEqual(matches.count, 15000)
         XCTAssertLessThan(elapsed, 1.0, "15000 个命中应在 1 秒内完成（原 O(n²) 实现需要数秒）")
@@ -232,13 +232,13 @@ class PerformanceCacheTests: XCTestCase {
             try? v.addRule(name: "mention", pattern: "@\\w+") { ctx in
                 counter.mention += 1
                 ctx.addAttributes([.foregroundColor: UIColor.blue])
-                ctx.onTap = {}
+                ctx.onTap = { _ in }
             }
             try? v.addRule(name: "box", pattern: "\\[box\\]") { ctx in
                 counter.box += 1
                 let view = UIView()
                 ctx.attributedString.setAttributedString(
-                    ctx.attachmentString(for: HTagWidget(view: view, size: CGSize(width: 20, height: 10))))
+                    ctx.attachmentString(for: ZLRichWidget(view: view, size: CGSize(width: 20, height: 10))))
             }
             v.text = text
         }
@@ -314,7 +314,7 @@ class PerformanceCacheTests: XCTestCase {
             try? v.addRule(name: "mention", pattern: "@\\w+", priority: 10) { _ in mentions += 1 }
             v.tagWidgetBuilder = { info, _ in
                 widgets += 1
-                return info.name == "h2" ? HTagWidget(view: UIView(), size: CGSize(width: 8, height: 8), position: .after) : nil
+                return info.name == "h2" ? ZLRichWidget(view: UIView(), size: CGSize(width: 8, height: 8), position: .after) : nil
             }
             v.text = "<h1>A</h1> @bob <h2>B</h2>"
         }
@@ -346,7 +346,7 @@ class PerformanceCacheTests: XCTestCase {
             v.style = [.font: UIFont.systemFont(ofSize: 15)]
             try? v.addRule(name: "box", pattern: "\\[box\\]") { ctx in
                 ctx.attributedString.setAttributedString(ctx.attachmentString(
-                    for: HTagWidget(view: UIView(), size: CGSize(width: 20, height: 20), alignment: .top)))
+                    for: ZLRichWidget(view: UIView(), size: CGSize(width: 20, height: 20), alignment: .top)))
             }
             v.text = "a [box] b"
         }
@@ -408,7 +408,7 @@ class ExpandCollapseTests: XCTestCase {
             v.collapseToken = NSAttributedString(string: " 收起", attributes: [.foregroundColor: UIColor.blue])
             try? v.addRule(name: "mention", pattern: "@\\w+") { ctx in
                 handlerCalls?.value += 1
-                ctx.onTap = {}
+                ctx.onTap = { _ in }
             }
             v.text = text
         }
@@ -525,7 +525,7 @@ class GestureTests: XCTestCase {
             v.style = [.font: UIFont.systemFont(ofSize: 15), .paragraphStyle: paragraph]
             try? v.addRule(name: "mention", pattern: "@\\w+") { ctx in
                 ctx.setText("👤" + ctx.matchedText.dropFirst(), attributes: [.foregroundColor: UIColor.purple])
-                ctx.onTap = {}
+                ctx.onTap = { _ in }
             }
             v.text = "Hi @alice, this is a long sentence that wraps onto the next line for testing."
         }
@@ -777,7 +777,7 @@ class SelectionTests: XCTestCase {
 
 class TagParserTests: XCTestCase {
 
-    private func describe(_ tags: [HTagInfo]) -> [String] {
+    private func describe(_ tags: [ZLTagInfo]) -> [String] {
         return tags.map { "\($0.name):\($0.text):\($0.depth)" }
     }
 
@@ -792,7 +792,7 @@ class TagParserTests: XCTestCase {
         XCTAssertEqual(describe(ZLTagParser.tags(in: "<hx>y</hx><b>z</b>")), [])
         // 与旧解析器结果一致
         let source = "agree <h1>User Agreement</h1>, <h2>Privacy<h2/> <h>x</h1> <h3>a</h3>"
-        XCTAssertEqual(describe(ZLTagParser.tags(in: source)), describe(HTagParser.tags(source)))
+        XCTAssertEqual(describe(ZLTagParser.tags(in: source)), describe(ZLTagParser.tags(source)))
     }
 
     func testAnyTagsWithAttributesAndNesting() {
@@ -808,8 +808,8 @@ class TagParserTests: XCTestCase {
         XCTAssertEqual(tags[2].attribute("HREF"), "https://x.com?a=1&b=2")
         XCTAssertEqual(tags[1].colorAttribute("value"), UIColor(red: 1, green: 0, blue: 0, alpha: 1))
         XCTAssertEqual(tags[3].raw, "<br/>")
-        XCTAssertEqual(HTagInfo.color(from: "blue"), .systemBlue)
-        XCTAssertNil(HTagInfo.color(from: "#12"))
+        XCTAssertEqual(ZLTagInfo.color(from: "blue"), .systemBlue)
+        XCTAssertNil(ZLTagInfo.color(from: "#12"))
     }
 
     func testNestingTolerance() {
@@ -826,7 +826,7 @@ class TagParserTests: XCTestCase {
 
     // MARK: Label
 
-    private func makeLabel(_ text: String, taps: @escaping (HTagInfo) -> Void) -> ZLTagRichLabel {
+    private func makeLabel(_ text: String, taps: @escaping (ZLTagInfo) -> Void) -> ZLTagRichLabel {
         let label = ZLTagRichLabel(frame: CGRect(x: 0, y: 0, width: 320, height: 0))
         label.numberOfLines = 0
         label.update { v in
@@ -1135,5 +1135,93 @@ class RichTextSwiftUITests: XCTestCase {
         spin()
         XCTAssertEqual(configureCalls, 1, "configure 只执行一次")
         XCTAssertEqual(label.rules.count, 1, "规则没有重复添加")
+    }
+}
+
+// MARK: - 点击回调传入命中
+
+class TapCallbackTests: XCTestCase {
+
+    private func tapAll(_ label: ZLRichLabel) {
+        let models = ((label.value(forKey: "linkModels") as? [Any]) ?? []).compactMap { $0 as? TTTAttributedLabelLink }
+        for link in models.sorted(by: { $0.result.range.location < $1.result.range.location }) {
+            link.linkTapBlock?(label, link)
+        }
+    }
+
+    func testOnTapReceivesCurrentMatchWithoutRetainingContext() {
+        var tapped: [String] = []
+        weak var weakContext: ZLRichRuleContext?
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: 300, height: 100))
+        label.update { v in
+            try? v.addRule(name: "mention", pattern: "@(\\w+)") { ctx in
+                weakContext = ctx
+                ctx.setText("👤" + (ctx.group(1) ?? ""))
+                ctx.onTap = { match in
+                    tapped.append("\(match.rule.name):\(match.text):\(match.group(1) ?? ""):\(match.index):\(match.source.prefix(2))")
+                }
+            }
+            v.text = "Hi @alice and @bob"
+        }
+        XCTAssertNil(weakContext, "回调没有持有 ctx，handler 结束后 ctx 即释放")
+
+        tapAll(label)
+        XCTAssertEqual(tapped, ["mention:@alice:alice:0:Hi", "mention:@bob:bob:1:Hi"])
+
+        // 命中位置和内容不变时复用缓存的渲染结果，点击时传入的仍是本次解析的命中
+        tapped = []
+        label.statistics.reset()
+        label.text = "Yo @alice and @bob"
+        XCTAssertEqual(label.statistics.handlerCalls, 0, "复用了缓存")
+        tapAll(label)
+        XCTAssertEqual(tapped, ["mention:@alice:alice:0:Yo", "mention:@bob:bob:1:Yo"])
+    }
+
+    func testLinkSegmentsReceiveMatch() {
+        var tapped: [String] = []
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: 300, height: 100))
+        label.update { v in
+            try? v.addRule(name: "pair", pattern: "\\[(\\w+)\\|(\\w+)\\]") { ctx in
+                let first = ctx.group(1) ?? "", second = ctx.group(2) ?? ""
+                ctx.setText(first + " " + second)
+                ctx.addLink(range: NSRange(location: 0, length: (first as NSString).length),
+                            onTap: { match in tapped.append("first:\(match.group(1) ?? "")") })
+                ctx.addLink(range: NSRange(location: (first as NSString).length + 1, length: (second as NSString).length),
+                            onTap: { match in tapped.append("second:\(match.group(2) ?? "")") })
+            }
+            v.text = "pick [left|right] now"
+        }
+        tapAll(label)
+        XCTAssertEqual(tapped, ["first:left", "second:right"])
+    }
+}
+
+// MARK: - Objective-C updateTag:
+
+class ObjCUpdateTagTests: XCTestCase {
+
+    func testUpdateTagPassesTagLabelAndBatchesRender() {
+        let label = ZLTagRichLabel(frame: CGRect(x: 0, y: 0, width: 300, height: 100))
+        let selector = NSSelectorFromString("updateTag:")
+        XCTAssertTrue(label.responds(to: selector), "OC 可以调用 updateTag:")
+
+        // 按 OC 的方式调用：[label updateTag:^(ZLTagRichLabel *v) { ... }]
+        typealias Block = @convention(block) (ZLTagRichLabel) -> Void
+        typealias Function = @convention(c) (AnyObject, Selector, Block) -> Void
+        let function = unsafeBitCast(label.method(for: selector), to: Function.self)
+
+        var received: ZLTagRichLabel?
+        label.statistics.reset()
+        function(label, selector) { v in
+            received = v
+            v.tagStyle = [.foregroundColor: UIColor.red]
+            v.tagStyles = ["h1": [.foregroundColor: UIColor.blue]]
+            v.tagPriority = 3
+            v.text = "Agree <h1>Terms</h1>"
+        }
+        XCTAssertTrue(received === label, "回调参数就是这个 ZLTagRichLabel")
+        XCTAssertEqual(label.statistics.renders, 1, "多处修改只渲染一次")
+        XCTAssertEqual(label.attributedText.string, "Agree Terms")
+        XCTAssertEqual(label.tags.map { $0.name }, ["h1"])
     }
 }

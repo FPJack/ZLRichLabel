@@ -67,14 +67,15 @@ pod 'ZLRichLabel'
 
 ```text
 ZLRichLabel/Classes/
-├── ZLRichDefines.swift    样式类型 HTagTextStyle、内嵌 View 配置 HTagWidget
-├── ZLRichRule.swift       TagRichRule / TagRichMatch / TagRichRuleContext / TagRichParser
+├── ZLRichDefines.swift    样式类型 ZLTextStyle、内嵌 View 配置 ZLRichWidget
+├── ZLRichRule.swift       ZLRichRule / ZLRichMatch / ZLRichRuleContext / ZLRichParser
 ├── ZLRichLabel.swift      基类：规则解析、渲染、内嵌 View、布局、截断、RTL、手势
 ├── ZLRichLabel+Selection.swift  选中复制：选中范围、拖柄、菜单、展示文字与原文的对应
 ├── ZLRichLabel+Decoration.swift 胶囊背景 / 渐变文字的属性与绘制
 ├── ZLRichText.swift      SwiftUI 封装（UIViewRepresentable），高度自适应
-├── ZLTagParser.swift      通用标签解析：任意标签名、属性、嵌套、自闭合、容错
-└── ZLTagRichLabel.swift   标签子类、HTagInfo、HTagParser
+├── ZLTagParser.swift      标签解析：通用标签（任意标签名、属性、嵌套、自闭合、容错）与 <h> 标签
+├── ZLTagRichLabel.swift   标签子类、ZLTagInfo、ZLTagSegment
+└── ZLRichLabel+Deprecated.swift 旧名字的过渡别名（Swift）
 ```
 
 ## 快速开始
@@ -113,16 +114,16 @@ label.update { v in
     // @提及
     try? v.addRule(name: "mention", pattern: "@\\w+", priority: 10) { ctx in
         ctx.addAttributes([.foregroundColor: UIColor.systemPurple])
-        let user = ctx.matchedText
-        ctx.onTap = { print("open", user) }
+        ctx.onTap = { match in print("open", match.text) }   // 参数是这次点击的命中
     }
 
     // 链接：NSDataDetector 也可以作为规则，替换展示文字
     if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
-        v.addRule(TagRichRule(name: "link", regex: detector, priority: 10) { ctx in
-            let url = ctx.match.result.url
+        v.addRule(ZLRichRule(name: "link", regex: detector, priority: 10) { ctx in
             ctx.setText("🔗网页链接", attributes: [.foregroundColor: UIColor.systemBlue])
-            ctx.onTap = { if let url = url { UIApplication.shared.open(url) } }
+            ctx.onTap = { match in
+                if let url = match.result.url { UIApplication.shared.open(url) }
+            }
         })
     }
 
@@ -136,10 +137,10 @@ label.update { v in
 
 ```swift
 // 正则字符串（非法时抛错）
-let rule = try TagRichRule(name: "topic", pattern: "#[^#\\s]+#", options: [], priority: 5) { ctx in ... }
+let rule = try ZLRichRule(name: "topic", pattern: "#[^#\\s]+#", options: [], priority: 5) { ctx in ... }
 
 // 已有的 NSRegularExpression / NSDataDetector
-let rule = TagRichRule(name: "link", regex: detector, priority: 10) { ctx in ... }
+let rule = ZLRichRule(name: "link", regex: detector, priority: 10) { ctx in ... }
 
 label.addRule(rule)                // 同名规则会被替换
 label.removeRule(named: "topic")
@@ -148,7 +149,7 @@ label.removeAllRules()             // 只移除外部规则，不影响子类内
 
 handler 的结果会按命中缓存（见 [性能与缓存](#性能与缓存)）：修改 `style` / font / textColor、深色模式或字号变化、调用 `rebuild()` 时重新执行；只改按下高亮 / 省略符，或文字变化但该命中的位置和内容没变时直接复用。**handler 依赖的外部数据变化后，请调用 `rebuild()` 或 `setNeedsRebuild(forRuleNamed:)`**。
 
-### TagRichRuleContext
+### ZLRichRuleContext
 
 handler 通过 `ctx` 读取命中信息，并写入要展示的内容：
 
@@ -161,9 +162,9 @@ handler 通过 `ctx` 读取命中信息，并写入要展示的内容：
 | `addAttributes(_:)` | 给整段内容追加属性 |
 | `setText(_:attributes:)` | 用新文字替换（默认带 baseStyle） |
 | `attachmentString(for:style:)` | 生成自定义 View 的占位富文本，拼进 `attributedString` 即可在该位置显示 View |
-| `onTap` | 设置后整段可点击（含其中的图片和 `tappable` 的 View） |
-| `onLongPress` | 长按这段内容时回调（设置后不再回调 label 的 `onLongPress`） |
-| `addLink(range:highlightStyle:onTap:onLongPress:)` | 给内容中的一段单独设置点击 / 长按 / 按下高亮；可以添加多段、可以互相包含，重叠时后添加的优先（嵌套标签就是先加外层、再加内层） |
+| `onTap` | `(ZLRichMatch) -> Void`，设置后整段可点击（含其中的图片和 `tappable` 的 View）。参数是这次点击的命中 |
+| `onLongPress` | `(ZLRichMatch) -> Void`，长按这段内容时回调（设置后不再回调 label 的 `onLongPress`） |
+| `addLink(range:highlightStyle:onTap:onLongPress:)` | 给内容中的一段单独设置点击 / 长按 / 按下高亮，回调参数同样是命中；可以添加多段、可以互相包含，重叠时后添加的优先（嵌套标签就是先加外层、再加内层） |
 | `highlightStyle` | 按下高亮，`nil` 使用 label 的 `highlightStyle`，`[:]` 不高亮 |
 
 插入图片：直接放 `NSTextAttachment` 即可，组件会自动转换成 `UIImageView` 显示（TTTAttributedLabel 本身不绘制 attachment）：
@@ -176,7 +177,7 @@ try? label.addRule(name: "emoji", pattern: "\\[(smile|heart)\\]") { ctx in
     attachment.image = image.withRenderingMode(.alwaysTemplate)
     attachment.bounds = CGRect(x: 0, y: 0, width: 17, height: 17)
     ctx.attributedString.setAttributedString(NSAttributedString(attachment: attachment))
-    ctx.onTap = { print("emoji", key) }
+    ctx.onTap = { match in print("emoji", match.group(1) ?? "") }
 }
 ```
 
@@ -186,14 +187,14 @@ try? label.addRule(name: "emoji", pattern: "\\[(smile|heart)\\]") { ctx in
 try? label.addRule(name: "vip", pattern: "\\[vip\\]") { ctx in
     let badge = UILabel()
     badge.text = "VIP"
-    let widget = HTagWidget(view: badge, size: CGSize(width: 30, height: 16), alignment: .middle)
+    let widget = ZLRichWidget(view: badge, size: CGSize(width: 30, height: 16), alignment: .middle)
     ctx.attributedString.setAttributedString(ctx.attachmentString(for: widget))
 }
 ```
 
 ### 自定义 View 尺寸变化
 
-内嵌的自定义 View（`HTagWidget` / `attachmentString(for:)` / `tagWidgetBuilder`）尺寸或内容变化后，label 会重新排版：后面的文字跟着移动、换行，label 高度同步更新（Auto Layout 下会触发外部重新布局）。只替换占位尺寸，**不会**重新执行规则 handler / builder，已有的点击和链接保持不变。
+内嵌的自定义 View（`ZLRichWidget` / `attachmentString(for:)` / `tagWidgetBuilder`）尺寸或内容变化后，label 会重新排版：后面的文字跟着移动、换行，label 高度同步更新（Auto Layout 下会触发外部重新布局）。只替换占位尺寸，**不会**重新执行规则 handler / builder，已有的点击和链接保持不变。
 
 | 场景 | 做法 |
 | --- | --- |
@@ -213,9 +214,10 @@ counter.zl_setNeedsRichLabelLayout()
 注意：
 
 - 固定尺寸（`size` 不为 `.zero`）且没有改过 frame 的 View，调用刷新不会改变其尺寸
-- 之后如果 label `rebuild()`（修改样式、文字等），builder / handler 会重新执行，View 尺寸以新返回的 `HTagWidget` 为准。需要保留变化后的状态时，请把状态存在外部，builder 按状态创建 View（见 Example 用例 21）
+- 之后如果 label `rebuild()`（修改样式、文字等），builder / handler 会重新执行，View 尺寸以新返回的 `ZLRichWidget` 为准。需要保留变化后的状态时，请把状态存在外部，builder 按状态创建 View（见 Example 用例 21）
 
-> ⚠️ 不要在 `onTap` 中强引用 `ctx`（`ctx` 持有 `onTap` 会形成循环引用），先把需要的值取出来再捕获。
+> 点击 / 长按回调的参数就是这次的命中（`match.text`、`match.group(_:)`、`match.result`、`match.rule`、`match.index`），回调里不需要引用 `ctx`。
+> 命中的渲染结果被缓存复用时（位置和内容不变），回调收到的也是本次解析的命中。
 
 ### 优先级
 
@@ -227,16 +229,16 @@ counter.zl_setNeedsRichLabelLayout()
 
 ```swift
 // "Call <h1>13800138000</h1>"
-label.hTagPriority = 0     // phone(20) 优先 → <h1> 标签作废，原样显示
-label.hTagPriority = 100   // <h1> 优先 → 里面的手机号不再被 phone 规则处理
+label.tagPriority = 0     // phone(20) 优先 → <h1> 标签作废，原样显示
+label.tagPriority = 100   // <h1> 优先 → 里面的手机号不再被 phone 规则处理
 ```
 
 解析结果：
 
 ```swift
 label.segments   // [ZLRichSegment]：普通文本 + 命中，按位置排序
-label.matches    // [TagRichMatch]：最终生效的命中（含内置规则）
-TagRichParser.resolve(text, rules: rules)   // 不创建 label，单独执行解析
+label.matches    // [ZLRichMatch]：最终生效的命中（含内置规则）
+ZLRichParser.resolve(text, rules: rules)   // 不创建 label，单独执行解析
 ```
 
 ## 标签（ZLTagRichLabel）
@@ -256,7 +258,7 @@ TagRichParser.resolve(text, rules: rules)   // 不创建 label，单独执行解
 
 以上是默认配置下的行为；开启 `allowsNestedTags` 后 `<h1>a<h2>b</h2>c</h1>` 会识别为嵌套的两个标签。
 
-### HTagInfo
+### ZLTagInfo
 
 | 属性 | 说明 |
 | --- | --- |
@@ -308,13 +310,13 @@ label.tagWidgetBuilder = { info, _ in
     let dot = UIView()
     dot.backgroundColor = .red
     dot.layer.cornerRadius = 3
-    return HTagWidget(view: dot, size: CGSize(width: 6, height: 6), position: .after)
+    return ZLRichWidget(view: dot, size: CGSize(width: 6, height: 6), position: .after)
 }
 ```
 
 View 的尺寸或内容变化后会自动 / 手动刷新排版，见 [自定义 View 尺寸变化](#自定义-view-尺寸变化)。
 
-`HTagWidget` 参数：
+`ZLRichWidget` 参数：
 
 | 参数 | 说明 |
 | --- | --- |
@@ -353,7 +355,7 @@ label.allowsSelfClosingTags = true     // 默认 false
 
 只想识别几种标签时，`tagNamePattern` 可以写成 `"b|i|u|color|a"`，其他标签原样显示。
 
-样式、自定义内容、点击都和 `<h>` 一样按标签名配置，属性在 `HTagInfo` 里读取：
+样式、自定义内容、点击都和 `<h>` 一样按标签名配置，属性在 `ZLTagInfo` 里读取：
 
 ```swift
 label.tagStyles = [
@@ -368,7 +370,7 @@ label.tagSpanBuilder = { info, style in                 // <br/>
 }
 label.tagWidgetBuilder = { info, _ in                   // <icon name="star.fill"/>
     guard info.name == "icon", let name = info.attribute("name") else { return nil }
-    return HTagWidget(view: UIImageView(image: UIImage(systemName: name)), size: CGSize(width: 16, height: 16))
+    return ZLRichWidget(view: UIImageView(image: UIImage(systemName: name)), size: CGSize(width: 16, height: 16))
 }
 label.setTapHandler({ info in print("open", info.attribute("href") ?? "") }, forTag: "a")
 label.text = "<b>粗体里 <color value=\"#2196F3\">蓝色 <a href=\"https://github.com\">链接</a></color></b><br/><icon name=\"star.fill\"/>"
@@ -394,17 +396,17 @@ label.text = "<b>粗体里 <color value=\"#2196F3\">蓝色 <a href=\"https://git
 不创建 label、单独解析：
 
 ```swift
-ZLTagParser.tags(in: source, configuration: .anyTags)   // [HTagInfo]，外层在前
+ZLTagParser.tags(in: source, configuration: .anyTags)   // [ZLTagInfo]，外层在前
 ```
 
 ### 其他
 
 ```swift
-label.parsesHTags = false            // 关闭 <h> 解析，只用自定义规则
+label.parsesTags = false            // 关闭 <h> 解析，只用自定义规则
 label.onParsed = { tags in ... }     // 解析完成后异步回调所有标签
-label.tags                           // 当前所有标签 [HTagInfo]
+label.tags                           // 当前所有标签 [ZLTagInfo]
 label.ruleMatches                    // 当前所有自定义规则命中（不含 <h> 标签）
-HTagParser.tags("<h1>a</h1>")        // 独立解析 <h> 标签，不创建 label
+ZLTagParser.tags("<h1>a</h1>")        // 独立解析 <h> 标签，不创建 label
 ```
 
 ## 通用配置
@@ -491,9 +493,8 @@ label.onLongPress = { info in
 
 // 某条规则的命中单独处理长按（设置后长按它不再回调 label.onLongPress）
 try? label.addRule(name: "mention", pattern: "@\\w+") { ctx in
-    let user = ctx.matchedText
-    ctx.onTap = { openProfile(user) }
-    ctx.onLongPress = { showMenu(for: user) }
+    ctx.onTap = { match in openProfile(match.text) }
+    ctx.onLongPress = { match in showMenu(for: match.text) }
 }
 
 // ZLTagRichLabel：长按标签
@@ -633,15 +634,14 @@ final class MentionLabel: ZLRichLabel {
     var mentionColor: UIColor = .systemBlue { didSet { setNeedsRebuild() } }   // 只影响渲染
     var onMentionTap: ((String) -> Void)?
 
-    private lazy var mentionRule = TagRichRule(name: "mention",
+    private lazy var mentionRule = ZLRichRule(name: "mention",
                                                regex: try! NSRegularExpression(pattern: "@\\w+")) { [weak self] ctx in
         guard let self = self else { return }
         ctx.addAttributes([.foregroundColor: self.mentionColor])
-        let user = ctx.matchedText
-        ctx.onTap = { [weak self] in self?.onMentionTap?(user) }
+        ctx.onTap = { [weak self] match in self?.onMentionTap?(match.text) }
     }
 
-    override var builtInRules: [TagRichRule] {
+    override var builtInRules: [ZLRichRule] {
         return super.builtInRules + [mentionRule]
     }
 
@@ -715,22 +715,20 @@ struct AgreementView: View {
 ZLTagRichLabel *label = [[ZLTagRichLabel alloc] initWithFrame:CGRectZero];
 label.numberOfLines = 0;
 
-// update: 的回调参数是基类 ZLRichLabel，需要转成实际类型
-[label update:^(ZLRichLabel *base) {
-    ZLTagRichLabel *v = (ZLTagRichLabel *)base;
+// updateTag: 的回调参数直接是 ZLTagRichLabel（基类 ZLRichLabel 用 update:）
+[label updateTag:^(ZLTagRichLabel *v) {
     v.style = @{NSFontAttributeName: [UIFont systemFontOfSize:15]};
     v.tagStyles = @{@"h1": @{NSForegroundColorAttributeName: UIColor.systemBlueColor}};
     v.tagHighlightStyles = @{@"h1": @{NSBackgroundColorAttributeName: UIColor.yellowColor}};
 
     // tagTapHandlers 在 OC 中不可用，使用 setTapHandler:forTag:
-    [v setTapHandler:^(HTagInfo *info) { NSLog(@"h1 %@", info.text); } forTag:@"h1"];
-    v.onTagTap = ^(HTagInfo *info) { NSLog(@"%@ level=%@", info.name, info.level); };
+    [v setTapHandler:^(ZLTagInfo *info) { NSLog(@"h1 %@", info.text); } forTag:@"h1"];
+    v.onTagTap = ^(ZLTagInfo *info) { NSLog(@"%@ level=%@", info.name, info.level); };
 
     [v addRuleWithName:@"mention" pattern:@"@\\w+" options:0 priority:10 error:nil
-               handler:^(TagRichRuleContext *ctx) {
+               handler:^(ZLRichRuleContext *ctx) {
         [ctx addAttributes:@{NSForegroundColorAttributeName: UIColor.systemPurpleColor}];
-        NSString *user = ctx.matchedText;              // 不要在 onTap 里强引用 ctx
-        ctx.onTap = ^{ NSLog(@"mention %@", user); };
+        ctx.onTap = ^(ZLRichMatch *match) { NSLog(@"mention %@", match.text); };   // 参数是这次点击的命中
     }];
 
     v.text = @"Agree to <h1>User Agreement</h1>, cc @bob";
@@ -739,13 +737,14 @@ label.numberOfLines = 0;
 
 | Swift | Objective-C |
 | --- | --- |
-| `label.update { v in }` | `[label update:^(ZLRichLabel *v) {}]`（或 `beginUpdates` / `endUpdates`） |
+| `label.update { v in }` | `ZLTagRichLabel`：`[label updateTag:^(ZLTagRichLabel *v) {}]`；`ZLRichLabel`：`[label update:^(ZLRichLabel *v) {}]`（或 `beginUpdates` / `endUpdates`） |
 | `tagTapHandlers = [...]` | `setTapHandler:forTag:` / `removeTapHandlerForTag:` |
 | `addRule(name:pattern:options:priority:handler:)` | `addRuleWithName:pattern:options:priority:error:handler:` |
 | `removeRule(named:)` | `removeRuleNamed:` |
 | `ctx.group(1)` / `ctx.group(named:)` | `[ctx groupAtIndex:1]` / `[ctx groupNamed:]` |
+| `ctx.onTap = { match in }` | `ctx.onTap = ^(ZLRichMatch *match) {}` |
 | `info.level`（`Int?`） | `info.level`（`NSNumber *`，`<h>` 时为 `nil`） |
-| `TagRichParser.resolve(_:rules:)` | `[TagRichParser matchesInString:rules:]` |
+| `ZLRichParser.resolve(_:rules:)` | `[ZLRichParser matchesInString:rules:]` |
 | `view.zl_setNeedsRichLabelLayout()` | `[view zl_setNeedsRichLabelLayout]` |
 | `invalidateLayout(forAttachmentView:)` | `invalidateLayoutForAttachmentView:` |
 | `setNeedsRebuild(forRuleNamed:)` | `setNeedsRebuildForRuleNamed:` |
@@ -754,12 +753,31 @@ label.numberOfLines = 0;
 | `characterIndex(at:)` / `match(at:)` / `gestureInfo(at:)` | `characterIndexAtPoint:` / `matchAtPoint:` / `gestureInfoAtPoint:` |
 | `select(range:)` / `rawText(forDisplayRange:)` / `copySelection(raw:)` | `selectRange:` / `rawTextForDisplayRange:` / `copySelectionRaw:` |
 | `onCopy = { text, isRaw in }` | `onCopy = ^(NSString *text, BOOL isRaw) {}` |
-| `tagConfiguration = .anyTags` | `tagNamePattern = HTagParser.anyTagNamePattern; allowsNestedTags = YES; allowsSelfClosingTags = YES;` |
+| `tagConfiguration = .anyTags` | `tagNamePattern = ZLTagParser.anyTagNamePattern; allowsNestedTags = YES; allowsSelfClosingTags = YES;` |
 | `info.attribute("href")` / `info.colorAttribute("value")` | `[info attributeNamed:@"href"]` / `[info colorAttributeNamed:@"value"]` |
-| `ZLTagParser.tags(in:configuration:)` | `[HTagParser tagsInString:namePattern:allowsNesting:allowsSelfClosing:]` |
+| `ZLTagParser.tags(in:configuration:)` | `[ZLTagParser tagsInString:namePattern:allowsNesting:allowsSelfClosing:]` |
 | `.zlBackground` / `.zlGradient` | `ZLRichLabel.textBackgroundAttributeName` / `ZLRichLabel.textGradientAttributeName` |
 | `ZLTextBackground(fillColor:strokeColor:cornerRadius:)` | `[ZLTextBackground backgroundWithFillColor:strokeColor:cornerRadius:]` |
 | `ZLTextGradient(colors:)` | `[ZLTextGradient gradientWithColors:]` |
+
+## 命名变更（迁移）
+
+所有公开类型统一使用 `ZL` 前缀。Swift 中旧名字仍可使用（`@available(*, deprecated, renamed:)` 类型别名，编译时提示改为新名字，Xcode 可一键修复）；
+Objective-C 不支持类型别名，请直接改用新类名。
+
+| 旧名字 | 新名字 |
+| --- | --- |
+| `HTagTextStyle` | `ZLTextStyle` |
+| `HTagWidget` / `HTagWidgetPosition` / `HTagWidgetAlignment` | `ZLRichWidget` / `ZLRichWidgetPosition` / `ZLRichWidgetAlignment` |
+| `TagRichRule` / `TagRichMatch` / `TagRichRuleContext` / `TagRichParser` | `ZLRichRule` / `ZLRichMatch` / `ZLRichRuleContext` / `ZLRichParser` |
+| `HTagInfo` / `HTagSegment` | `ZLTagInfo` / `ZLTagSegment` |
+| `HTagParser` | `ZLTagParser`（与通用标签解析器合并，`parse(_:)` / `tags(_:)` 不变） |
+| `HTagStyleBuilder` / `HTagSpanBuilder` / `HTagWidgetBuilder` / `HTagTapCallback` | `ZLTagStyleBuilder` / `ZLTagSpanBuilder` / `ZLTagWidgetBuilder` / `ZLTagTapCallback` |
+| `ZLTagRichLabel.hTagPriority` / `parsesHTags` / `hTagRuleName` | `tagPriority` / `parsesTags` / `tagRuleName`（规则名的值仍为 `"h-tag"`） |
+| OC 枚举 `HTagWidgetPositionReplace` 等 | `ZLRichWidgetPositionReplace` 等 |
+
+另外，`ctx.onTap` / `ctx.onLongPress` / `addLink` 的回调改为接收命中信息：`ctx.onTap = { match in ... }`（OC：`^(ZLRichMatch *match) {}`），
+原来不带参数的写法需要加上参数（不用时写 `_ in`）。
 
 ## Example
 

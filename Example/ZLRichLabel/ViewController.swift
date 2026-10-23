@@ -30,7 +30,7 @@ class ViewController: UIViewController {
                 let icon = UIView()
                 icon.backgroundColor = .orange
                 icon.layer.cornerRadius = 8
-                return HTagWidget(view: icon, size: CGSize(width: 16, height: 16), position: .before)
+                return ZLRichWidget(view: icon, size: CGSize(width: 16, height: 16), position: .before)
             }
             v.tagTapHandlers = ["h1": { info in print("open agreement: \(info)") }]
             v.onTagTap = { info in print("tap: \(info)") }

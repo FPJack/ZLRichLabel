@@ -4,6 +4,7 @@
 //
 //  可配置的标签解析器：任意标签名（`<b>`、`<a href="…">`、`<color value="#f00">`）、标签属性、嵌套、容错。
 //  `ZLTagRichLabel` 用它实现内置的标签规则；也可以单独使用（`ZLTagParser.tags(in:configuration:)`）。
+//  同时提供 `<h>` 标签的简单解析 `ZLTagParser.parse(_:)` / `tags(_:)`（原 `HTagParser`）。
 //
 //  容错规则：
 //  - 标签名不符合 `namePattern` 的标签当作普通文字（例如默认配置下的 `<hx>`）
@@ -109,8 +110,12 @@ final class ZLTagDocument {
     }
 }
 
-/// 可配置的标签解析器
-public enum ZLTagParser {
+/// 标签解析器（Objective-C 可用）：
+/// - 可配置的通用解析：`tags(in:configuration:)`（任意标签名、属性、嵌套、自闭合、容错）
+/// - `<h>` 标签的简单解析：`parse(_:)` / `tags(_:)`（原 `HTagParser`）
+public final class ZLTagParser: NSObject {
+
+    private override init() { super.init() }
 
     // swiftlint:disable force_try
     /// 标签：group 1 为 `/`（闭合），group 2 为标签名，group 3 为属性，group 4 为 `/`（自闭合）
@@ -137,11 +142,11 @@ public enum ZLTagParser {
     }
 
     /// 解析，返回所有标签信息（先序：外层在前，`index` 按开始标签的位置计数）
-    public static func tags(in source: String, configuration: ZLTagParserConfiguration = .hTags) -> [HTagInfo] {
+    @nonobjc public static func tags(in source: String, configuration: ZLTagParserConfiguration = .hTags) -> [ZLTagInfo] {
         let document = parse(source, configuration: configuration)
         let ns = source as NSString
-        var result: [HTagInfo] = []
-        var infos: [ObjectIdentifier: HTagInfo] = [:]
+        var result: [ZLTagInfo] = []
+        var infos: [ObjectIdentifier: ZLTagInfo] = [:]
         for root in document.roots {
             for element in root.allElements {
                 let parent = element.parent.flatMap { infos[ObjectIdentifier($0)] }
@@ -153,8 +158,8 @@ public enum ZLTagParser {
         return result
     }
 
-    static func makeInfo(_ element: ZLTagElement, in source: NSString, index: Int, parent: HTagInfo?) -> HTagInfo {
-        return HTagInfo(index: index, name: element.name, text: element.plainText(in: source),
+    static func makeInfo(_ element: ZLTagElement, in source: NSString, index: Int, parent: ZLTagInfo?) -> ZLTagInfo {
+        return ZLTagInfo(index: index, name: element.name, text: element.plainText(in: source),
                         raw: source.substring(with: element.range), attributes: element.attributes, parent: parent)
     }
 
@@ -276,11 +281,77 @@ public enum ZLTagParser {
             .replacingOccurrences(of: "&gt;", with: ">")
             .replacingOccurrences(of: "&amp;", with: "&")
     }
+
+    // MARK: <h> 标签（原 HTagParser）
+    //
+    // - 闭合写法支持 `</h1>` 与 `<h1/>`，开闭标签名必须一致（不区分大小写）
+    // - 开闭不匹配（如 `<h1>xx</h2>`）或未闭合的标签按普通文字原样展示，且不会影响后面的标签
+    // - 不支持嵌套：`<h1>a<h2>b</h2></h1>` 只识别最内层的 `<h2>b</h2>`，外层 `<h1>`、`</h1>` 原样展示
+
+
+    // swiftlint:disable force_try
+    /// 标签正则：group 1 为标签名，group 2 为标签内文字
+    @objc public static let tagRegex = try! NSRegularExpression(
+        // 标签内容中不允许再出现 h 标签（开/闭/自闭合），避免不匹配或未闭合的标签"吞掉"后面的内容
+        pattern: "<(h\\d*)>((?:(?!</?h\\d*/?>)[\\s\\S])*?)(?:</\\1>|<\\1/>)",
+        options: [.caseInsensitive])
+    // swiftlint:enable force_try
+
+    /// 从一次正则命中生成标签信息
+    @nonobjc static func info(from result: NSTextCheckingResult, in source: NSString, index: Int) -> ZLTagInfo {
+        let name = source.substring(with: result.range(at: 1)).lowercased()
+        let textRange = result.range(at: 2)
+        let text = textRange.location == NSNotFound ? "" : source.substring(with: textRange)
+        return ZLTagInfo(index: index, name: name, text: text, raw: source.substring(with: result.range))
+    }
+
+    @objc(parse:)
+    public static func parse(_ source: String) -> [ZLTagSegment] {
+        let ns = source as NSString
+        var segments: [ZLTagSegment] = []
+        var cursor = 0
+        var index = 0
+
+        for match in tagRegex.matches(in: source, options: [], range: NSRange(location: 0, length: ns.length)) {
+            if match.range.location > cursor {
+                let text = ns.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+                segments.append(ZLTagSegment(text: text, tag: nil))
+            }
+            let info = ZLTagParser.info(from: match, in: ns, index: index)
+            segments.append(ZLTagSegment(text: info.text, tag: info))
+            index += 1
+            cursor = match.range.location + match.range.length
+        }
+
+        if cursor < ns.length {
+            segments.append(ZLTagSegment(text: ns.substring(from: cursor), tag: nil))
+        }
+        return segments
+    }
+
+    /// 仅获取所有标签信息
+    @objc(tags:)
+    public static func tags(_ source: String) -> [ZLTagInfo] {
+        return parse(source).compactMap { $0.tag }
+    }
+
+    /// 通用标签解析（任意标签名、属性、嵌套），返回所有标签（外层在前，内层的 `parent` 指向外层）。
+    /// Swift 也可以直接用 `ZLTagParser.tags(in:configuration:)`
+    @objc(tagsInString:namePattern:allowsNesting:allowsSelfClosing:)
+    public static func tags(in source: String, namePattern: String, allowsNesting: Bool,
+                            allowsSelfClosing: Bool) -> [ZLTagInfo] {
+        let configuration = ZLTagParserConfiguration(namePattern: namePattern, allowsNesting: allowsNesting,
+                                                     allowsSelfClosing: allowsSelfClosing)
+        return tags(in: source, configuration: configuration)
+    }
+
+    /// 任意标签名的正则（`[a-z][a-z0-9_:-]*`），配合 `tagNamePattern` / `tagsInString:namePattern:…` 使用
+    @objc public static var anyTagNamePattern: String { return ZLTagParserConfiguration.anyTagName }
 }
 
 // MARK: - 规则适配
 
-/// 让标签解析器可以作为 `TagRichRule` 的正则使用：`matches` 返回最外层标签的范围
+/// 让标签解析器可以作为 `ZLRichRule` 的正则使用：`matches` 返回最外层标签的范围
 /// （group 1 为标签名，group 2 为标签内容），与其他规则一起按优先级处理重叠
 /// 可变状态（解析缓存）由 `lock` 保护
 final class ZLTagMarkupExpression: NSRegularExpression, @unchecked Sendable {
