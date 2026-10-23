@@ -97,6 +97,8 @@ final class HTagDemoPage: UIViewController {
         case22()
         // 性能：渲染缓存 / 排版缓存
         case23()
+        // 展开 / 收起
+        case24()
         stackView.addArrangedSubview(historyCard)
 
         refreshTapViews()
@@ -783,6 +785,37 @@ final class HTagDemoPage: UIViewController {
 
     @objc private func scaleSwitchChanged22(_ sender: UISwitch) {
         case22Label?.adjustsFontForContentSizeCategory = sender.isOn
+    }
+
+    // MARK: - 展开 / 收起
+
+    /// 24. 展开 / 收起：超过 numberOfLines 行时末尾显示可点击的「… 全文」，展开后末尾显示「收起」
+    private func case24() {
+        let long = "<h1>ZLRichLabel</h1> 支持「展开 / 收起」：内容超过 numberOfLines 行时，最后一行末尾显示可点击的「… 全文」，"
+            + "点击后展开全部内容，末尾出现「收起」。适用于动态、评论、商品详情等场景。"
+            + "展开状态可以保存在数据里，列表复用 cell 时直接设置 isExpanded，不会触发 onExpandChanged。"
+            + "<h2>#标签#</h2> 的点击和按下高亮不受影响。"
+        let cases = [
+            ("24. 展开 / 收起（收起时 3 行）", long),
+            ("24b. 内容不足 3 行：不显示「全文」", "<h1>短内容</h1> 不会被截断，也不显示按钮。"),
+        ]
+        for (title, text) in cases {
+            addCase(title, source: text) { v in
+                v.numberOfLines = 3
+                v.tagStyle = [.foregroundColor: UIColor.mBlue]
+                v.tagHighlightStyle = [.backgroundColor: UIColor(white: 0, alpha: 0.08)]
+                let tokenStyle: HTagTextStyle = [.foregroundColor: UIColor.mDeepOrange,
+                                                 .font: UIFont.systemFont(ofSize: 15, weight: .semibold)]
+                v.expandToken = NSAttributedString(string: "… 全文", attributes: tokenStyle)
+                v.collapseToken = NSAttributedString(string: " 收起", attributes: tokenStyle)
+                v.onExpandChanged = { [weak self] expanded in
+                    guard let self = self else { return }
+                    let info = HTagInfo(index: 0, name: "expand", text: expanded ? "全文" : "收起", raw: "")
+                    self.onTap(title, info, action: "onExpandChanged(\(expanded))")
+                    UIView.animate(withDuration: 0.25) { self.view.layoutIfNeeded() }
+                }
+            }
+        }
     }
 
     // MARK: - 性能

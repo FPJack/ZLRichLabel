@@ -40,6 +40,7 @@ Swift 与 Objective-C 均可使用，基于 [TTTAttributedLabel](https://github.
 - `<h>` 标签：`<h>`、`<h1>`…`<hN>`，`</h1>` 和 `<h1/>` 两种闭合写法，不区分大小写；按标签名区分样式与点击；可替换为自定义 View
 - 容错：开闭不匹配、未闭合的标签原样显示，不影响后面的标签
 - 多行截断（自定义省略符）、Auto Layout 自适应高度
+- 展开 / 收起：截断时末尾显示可点击的「… 全文」，展开后显示「收起」
 - 渲染缓存 + 排版缓存：改样式 / 追加文字时只重新处理变化的部分
 - RTL：阿拉伯语 / 希伯来语等从右到左文本自动右对齐，支持双向混排
 - 深色模式自动重新渲染；可选支持 Dynamic Type（系统文字大小）
@@ -358,6 +359,40 @@ HTagParser.tags("<h1>a</h1>")        // 独立解析，不创建 label
 
 xib / storyboard 中设置的文字同样会被解析。
 
+## 展开 / 收起
+
+内容超过 `numberOfLines` 行时，最后一行末尾显示 `expandToken`（代替省略符），点击后展开全部内容；展开后在末尾显示 `collapseToken`，点击恢复。
+
+```swift
+label.numberOfLines = 3                      // 收起时的行数
+label.expandToken = NSAttributedString(string: "… 全文", attributes: [.foregroundColor: UIColor.systemBlue])
+label.collapseToken = NSAttributedString(string: " 收起", attributes: [.foregroundColor: UIColor.systemBlue])
+label.onExpandChanged = { [weak self] expanded in
+    self?.model.isExpanded = expanded        // 保存状态
+    self?.tableView.performBatchUpdates(nil) // 列表中刷新行高
+}
+
+// cell 复用时按数据设置，不会触发 onExpandChanged
+label.isExpanded = model.isExpanded
+```
+
+| API | 说明 |
+| --- | --- |
+| `expandToken` | 「展开」按钮，没设置的属性使用普通文本样式；为 nil（默认）时只显示省略符 |
+| `collapseToken` | 「收起」按钮，展开后拼接在末尾，可点击、有按下高亮；为 nil 时展开后不能收起 |
+| `isExpanded` | 展开状态。直接设置不回调 `onExpandChanged` |
+| `onExpandChanged` | 点击「全文 / 收起」后回调新的状态 |
+| `toggleExpanded()` | 切换状态并回调，与点击效果相同 |
+| `numberOfLines` / `collapsedNumberOfLines` | 展开时 `numberOfLines` 读取为 0；设置的行数保存在 `collapsedNumberOfLines` |
+| `isTruncated` | 当前内容是否被截断（最近一次布局的结果） |
+| `expandTokenRect` | 「展开」按钮的点击区域（label 坐标系） |
+
+注意：
+
+- 设置 `expandToken` 后 `lineBreakMode` 会改为 `.byTruncatingTail`
+- 展开 / 收起只重新拼装内容，不会重新执行规则 handler / builder
+- 内容不足 `numberOfLines` 行时不显示「展开」；直接设置 `isExpanded = true` 时，即使内容很短也会显示「收起」
+
 ## 性能与缓存
 
 **渲染缓存**：每个命中的渲染结果（handler / builder 的输出、创建的自定义 View、点击）都会缓存，下次渲染时直接复用，不执行 handler、不重建 View。
@@ -460,6 +495,7 @@ label.numberOfLines = 0;
 | `view.zl_setNeedsRichLabelLayout()` | `[view zl_setNeedsRichLabelLayout]` |
 | `invalidateLayout(forAttachmentView:)` | `invalidateLayoutForAttachmentView:` |
 | `setNeedsRebuild(forRuleNamed:)` | `setNeedsRebuildForRuleNamed:` |
+| `onExpandChanged = { expanded in }` | `onExpandChanged = ^(BOOL expanded) {}` |
 
 ## Example
 
@@ -481,6 +517,7 @@ open ZLRichLabel.xcworkspace
 | 21 | 自定义 View 尺寸变化自动刷新排版：点击色块改 frame 变宽、点赞计数文字变化 |
 | 22 | 深色模式 / Dynamic Type：切换预览区域的外观与文字大小，文字、标签、规则内容和自定义 View 一起变化 |
 | 23 | 性能：600 个命中（含 200 张图片）的 label，对比改高亮 / 追加文字 / 只刷新一条规则 / `rebuild()` 的耗时与 handler 执行次数，`sizeThatFits` 缓存，1.5 万命中的解析耗时 |
+| 24 | 展开 / 收起：3 行截断显示「… 全文」，展开后显示「收起」；内容不足 3 行时不显示按钮 |
 
 页面顶部会显示最近一次点击得到的完整信息，底部有点击历史。
 

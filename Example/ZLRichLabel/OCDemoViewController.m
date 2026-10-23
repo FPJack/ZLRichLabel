@@ -597,6 +597,8 @@ static NSString *OCQuote(NSString *s) {
     [self case22];
     // 性能：渲染缓存 / 排版缓存
     [self case23];
+    // 展开 / 收起
+    [self case24];
     [self.stackView addArrangedSubview:self.historyCard];
 
     [self refreshTapViews];
@@ -1333,6 +1335,40 @@ static NSString *OCQuote(NSString *s) {
 
 - (void)scaleSwitchChanged22:(UISwitch *)sender {
     self.case22Label.adjustsFontForContentSizeCategory = sender.isOn;
+}
+
+#pragma mark - 展开 / 收起
+
+/// 24. 展开 / 收起：超过 numberOfLines 行时末尾显示可点击的「… 全文」，展开后末尾显示「收起」
+- (void)case24 {
+    NSString *longText = @"<h1>ZLRichLabel</h1> 支持「展开 / 收起」：内容超过 numberOfLines 行时，最后一行末尾显示可点击的「… 全文」，"
+                         @"点击后展开全部内容，末尾出现「收起」。适用于动态、评论、商品详情等场景。"
+                         @"展开状态可以保存在数据里，列表复用 cell 时直接设置 isExpanded，不会触发 onExpandChanged。"
+                         @"<h2>#标签#</h2> 的点击和按下高亮不受影响。";
+    NSArray<NSArray<NSString *> *> *cases = @[
+        @[@"24. 展开 / 收起（收起时 3 行）", longText],
+        @[@"24b. 内容不足 3 行：不显示「全文」", @"<h1>短内容</h1> 不会被截断，也不显示按钮。"],
+    ];
+    __weak typeof(self) weakSelf = self;
+    for (NSArray<NSString *> *item in cases) {
+        NSString *title = item[0];
+        [self addCase:title source:item[1] configure:^(ZLTagRichLabel *v) {
+            v.numberOfLines = 3;
+            v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
+            v.tagHighlightStyle = @{NSBackgroundColorAttributeName: [UIColor colorWithWhite:0 alpha:0.08]};
+            NSDictionary *tokenStyle = @{NSForegroundColorAttributeName: kDeepOrange,
+                                         NSFontAttributeName: [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold]};
+            v.expandToken = [[NSAttributedString alloc] initWithString:@"… 全文" attributes:tokenStyle];
+            v.collapseToken = [[NSAttributedString alloc] initWithString:@" 收起" attributes:tokenStyle];
+            v.onExpandChanged = ^(BOOL expanded) {
+                OCDemoViewController *strongSelf = weakSelf;
+                if (!strongSelf) { return; }
+                HTagInfo *info = [[HTagInfo alloc] initWithIndex:0 name:@"expand" text:expanded ? @"全文" : @"收起" raw:@""];
+                [strongSelf onTap:title info:info action:[NSString stringWithFormat:@"onExpandChanged(%@)", expanded ? @"YES" : @"NO"]];
+                [UIView animateWithDuration:0.25 animations:^{ [strongSelf.view layoutIfNeeded]; }];
+            };
+        }];
+    }
 }
 
 #pragma mark - 性能

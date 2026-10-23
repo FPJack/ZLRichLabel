@@ -1,5 +1,6 @@
 import XCTest
 import ZLRichLabel
+import TTTAttributedLabel
 
 /// 自定义 View 尺寸变化后刷新排版
 class AttachmentResizeTests: XCTestCase {
@@ -372,5 +373,128 @@ class PerformanceCacheTests: XCTestCase {
         // 内容变化后缓存失效，结果随之变化
         label.text = "Hi @alice and [box], cc @bob and a much longer tail that wraps onto more lines"
         XCTAssertGreaterThan(label.sizeThatFits(fitting).height, size.height)
+    }
+}
+
+/// 展开 / 收起
+class ExpandCollapseTests: XCTestCase {
+
+    final class Box { var value = 0 }
+
+    private var window: UIWindow!
+
+    override func setUp() {
+        super.setUp()
+        window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        window.isHidden = false
+    }
+
+    override func tearDown() {
+        window.isHidden = true
+        window = nil
+        super.tearDown()
+    }
+
+    private let longText = "Swift is a powerful and intuitive programming language for all Apple platforms. "
+        + "It is easy to get started using Swift, with a concise yet expressive syntax and modern features "
+        + "developers love. Swift code is safe by design and produces software that runs lightning-fast. @alice"
+
+    private func makeLabel(text: String, handlerCalls: Box? = nil) -> ZLRichLabel {
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: 220, height: 0))
+        label.numberOfLines = 2
+        label.update { v in
+            v.style = [.font: UIFont.systemFont(ofSize: 15)]
+            v.expandToken = NSAttributedString(string: "… 全文", attributes: [.foregroundColor: UIColor.blue])
+            v.collapseToken = NSAttributedString(string: " 收起", attributes: [.foregroundColor: UIColor.blue])
+            try? v.addRule(name: "mention", pattern: "@\\w+") { ctx in
+                handlerCalls?.value += 1
+                ctx.onTap = {}
+            }
+            v.text = text
+        }
+        window.addSubview(label)
+        fit(label)
+        return label
+    }
+
+    private func fit(_ label: ZLRichLabel) {
+        let size = label.sizeThatFits(CGSize(width: 220, height: CGFloat.greatestFiniteMagnitude))
+        label.frame = CGRect(x: 0, y: 0, width: 220, height: size.height)
+        label.setNeedsLayout()
+        label.layoutIfNeeded()
+    }
+
+    func testTruncatedShowsExpandTokenOnLastLine() {
+        let label = makeLabel(text: longText)
+        XCTAssertTrue(label.isTruncated)
+        XCTAssertFalse(label.isExpanded)
+        let rect = label.expandTokenRect
+        XCTAssertFalse(rect.isEmpty, "被截断时应计算出「展开」按钮区域")
+        XCTAssertGreaterThan(rect.midY, label.bounds.height / 2, "按钮在最后一行")
+        XCTAssertGreaterThan(rect.midX, label.bounds.width / 2, "按钮在行尾")
+        XCTAssertLessThanOrEqual(rect.maxX, label.bounds.width + 8)
+        XCTAssertTrue(label.attributedTruncationToken.string == "… 全文")
+    }
+
+    func testShortTextIsNotTruncated() {
+        let label = makeLabel(text: "Short @bob")
+        XCTAssertFalse(label.isTruncated)
+        XCTAssertEqual(label.expandTokenRect, .zero)
+        XCTAssertFalse((label.attributedText?.string ?? "").hasSuffix("收起"))
+    }
+
+    func testToggleExpandAndCollapse() {
+        let calls = Box()
+        let label = makeLabel(text: longText, handlerCalls: calls)
+        let collapsedHeight = label.bounds.height
+        XCTAssertEqual(calls.value, 1)
+
+        var changes: [Bool] = []
+        label.onExpandChanged = { changes.append($0) }
+
+        label.toggleExpanded()
+        fit(label)
+        XCTAssertTrue(label.isExpanded)
+        XCTAssertEqual(changes, [true])
+        XCTAssertEqual(label.numberOfLines, 0, "展开时显示全部")
+        XCTAssertEqual(label.collapsedNumberOfLines, 2, "设置的行数保留")
+        XCTAssertGreaterThan(label.bounds.height, collapsedHeight)
+        XCTAssertFalse(label.isTruncated)
+        XCTAssertEqual(label.expandTokenRect, .zero)
+        XCTAssertTrue(label.attributedText.string.hasSuffix(" 收起"), "展开后末尾显示「收起」")
+        XCTAssertEqual(label.links.count, 2, "@alice + 收起")
+        XCTAssertEqual(calls.value, 1, "展开 / 收起只重新拼装，不重新执行 handler")
+
+        // 点击「收起」链接
+        // TTT 的 links 只保存 NSTextCheckingResult，链接对象在 linkModels 中
+        let models = (label.value(forKey: "linkModels") as? [Any]) ?? []
+        let collapseLink = models.compactMap { $0 as? TTTAttributedLabelLink }
+            .max { $0.result.range.location < $1.result.range.location }
+        collapseLink?.linkTapBlock?(label, collapseLink!)
+        fit(label)
+        XCTAssertFalse(label.isExpanded)
+        XCTAssertEqual(changes, [true, false])
+        XCTAssertEqual(label.numberOfLines, 2)
+        XCTAssertEqual(label.bounds.height, collapsedHeight)
+        XCTAssertTrue(label.isTruncated)
+        XCTAssertFalse(label.expandTokenRect.isEmpty)
+    }
+
+    func testSettingIsExpandedDirectlyDoesNotNotify() {
+        let label = makeLabel(text: longText)
+        var notified = false
+        label.onExpandChanged = { _ in notified = true }
+        label.isExpanded = true
+        label.isExpanded = false
+        XCTAssertFalse(notified, "直接设置（例如 cell 复用）不回调")
+    }
+
+    func testNoCollapseTokenMeansNoCollapseLink() {
+        let label = makeLabel(text: longText)
+        label.collapseToken = nil
+        label.isExpanded = true
+        fit(label)
+        XCTAssertFalse(label.attributedText.string.hasSuffix("收起"))
+        XCTAssertEqual(label.links.count, 1)
     }
 }
