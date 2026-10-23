@@ -2,11 +2,13 @@
 //  ZLTagRichLabel.swift
 //  ZLRichLabel
 //
-//  基于 `ZLRichLabel` 的标签高亮组件：支持 `<h>`、`<h1>`、`<h2>`、`<h3>` … 标签，
-//  按标签名区分高亮样式、按下高亮与点击事件。`<h>` 标签以内置规则（`h-tag`）的形式实现，
+//  基于 `ZLRichLabel` 的标签高亮组件：默认支持 `<h>`、`<h1>`、`<h2>`、`<h3>` … 标签，
+//  按标签名区分高亮样式、按下高亮与点击事件。标签以内置规则（`h-tag`）的形式实现，
 //  可与外部添加的正则规则一起使用（按优先级处理重叠）。
 //
 //  标签写法：`<h1>文字</h1>` 或 `<h1>文字<h1/>`，开闭标签名必须一致（不区分大小写）
+//  通过 `tagNamePattern` / `allowsNestedTags` / `allowsSelfClosingTags` 可以识别任意标签名、
+//  解析标签属性（`<a href="…">`、`<color value="#f00">`）并支持嵌套，见 `ZLTagParser`
 //
 
 import UIKit
@@ -24,17 +26,67 @@ public final class HTagInfo: NSObject {
     public let text: String
     /// 完整的原始标签字符串，例如 `<h1>User Agreement</h1>`
     public let raw: String
+    /// 标签属性（名称为小写），例如 `<a href="https://x.com" target=_blank>` → `["href": "https://x.com", "target": "_blank"]`。
+    /// 没有值的属性（`<input disabled>`）值为空字符串
+    public let attributes: [String: String]
+    /// 外层标签（嵌套时），最外层为 nil
+    public let parent: HTagInfo?
 
-    public init(index: Int, name: String, text: String, raw: String) {
+    public convenience init(index: Int, name: String, text: String, raw: String) {
+        self.init(index: index, name: name, text: text, raw: raw, attributes: [:], parent: nil)
+    }
+
+    public init(index: Int, name: String, text: String, raw: String, attributes: [String: String], parent: HTagInfo?) {
         self.index = index
         self.name = name
         self.text = text
         self.raw = raw
+        self.attributes = attributes
+        self.parent = parent
         super.init()
     }
 
-    /// 标签名中 `h` 后面的数字：`<h1>` 为 1，`<h12>` 为 12，`<h>` 为 nil
+    /// 嵌套深度：最外层为 0
+    public var depth: Int {
+        return parent.map { $0.depth + 1 } ?? 0
+    }
+
+    /// 读取属性（名称不区分大小写）
+    @objc(attributeNamed:)
+    public func attribute(_ name: String) -> String? {
+        return attributes[name.lowercased()]
+    }
+
+    /// 把属性值解析为颜色：支持 `#rgb`、`#rrggbb`、`#rrggbbaa`（`#` 可省略）和常见颜色名（red、blue、gray …）
+    @objc(colorAttributeNamed:)
+    public func colorAttribute(_ name: String) -> UIColor? {
+        return attribute(name).flatMap(HTagInfo.color(from:))
+    }
+
+    /// 解析颜色字符串（规则同 `colorAttribute(_:)`）
+    @objc(colorFromString:)
+    public static func color(from string: String) -> UIColor? {
+        let value = string.trimmingCharacters(in: .whitespaces).lowercased()
+        let named: [String: UIColor] = [
+            "red": .systemRed, "green": .systemGreen, "blue": .systemBlue, "orange": .systemOrange,
+            "yellow": .systemYellow, "purple": .systemPurple, "pink": .systemPink, "teal": .systemTeal,
+            "gray": .systemGray, "grey": .systemGray, "black": .black, "white": .white, "clear": .clear,
+        ]
+        if let color = named[value] { return color }
+        var hex = value.hasPrefix("#") ? String(value.dropFirst()) : value
+        if hex.count == 3 { hex = hex.map { "\($0)\($0)" }.joined() }
+        guard hex.count == 6 || hex.count == 8, let number = UInt64(hex, radix: 16) else { return nil }
+        let hasAlpha = hex.count == 8
+        let r = CGFloat((number >> (hasAlpha ? 24 : 16)) & 0xFF) / 255
+        let g = CGFloat((number >> (hasAlpha ? 16 : 8)) & 0xFF) / 255
+        let b = CGFloat((number >> (hasAlpha ? 8 : 0)) & 0xFF) / 255
+        let a = hasAlpha ? CGFloat(number & 0xFF) / 255 : 1
+        return UIColor(red: r, green: g, blue: b, alpha: a)
+    }
+
+    /// `<hN>` 标签名中 `h` 后面的数字：`<h1>` 为 1，`<h12>` 为 12；`<h>` 和其他标签名为 nil
     @nonobjc public var level: Int? {
+        guard name.hasPrefix("h") else { return nil }
         return Int(name.dropFirst())
     }
 
@@ -44,7 +96,9 @@ public final class HTagInfo: NSObject {
     }
 
     public override var description: String {
-        return "HTagInfo(index: \(index), name: \(name), text: \(text), raw: \(raw))"
+        let attrs = attributes.isEmpty ? "" : ", attributes: \(attributes)"
+        let depthText = parent == nil ? "" : ", depth: \(depth), parent: \(parent!.name)"
+        return "HTagInfo(index: \(index), name: \(name), text: \(text), raw: \(raw)\(attrs)\(depthText))"
     }
 }
 
@@ -118,6 +172,19 @@ public final class HTagParser: NSObject {
     public static func tags(_ source: String) -> [HTagInfo] {
         return parse(source).compactMap { $0.tag }
     }
+
+    /// 通用标签解析（任意标签名、属性、嵌套），返回所有标签（外层在前，内层的 `parent` 指向外层）。
+    /// Swift 也可以直接用 `ZLTagParser.tags(in:configuration:)`
+    @objc(tagsInString:namePattern:allowsNesting:allowsSelfClosing:)
+    public static func tags(in source: String, namePattern: String, allowsNesting: Bool,
+                            allowsSelfClosing: Bool) -> [HTagInfo] {
+        let configuration = ZLTagParserConfiguration(namePattern: namePattern, allowsNesting: allowsNesting,
+                                                     allowsSelfClosing: allowsSelfClosing)
+        return ZLTagParser.tags(in: source, configuration: configuration)
+    }
+
+    /// 任意标签名的正则（`[a-z][a-z0-9_:-]*`），配合 `tagNamePattern` / `tagsInString:namePattern:…` 使用
+    public static var anyTagNamePattern: String { return ZLTagParserConfiguration.anyTagName }
 }
 
 // MARK: - 配置类型
@@ -227,7 +294,7 @@ open class ZLTagRichLabel: ZLRichLabel {
 
     // MARK: 解析配置
 
-    /// 内置 `<h>` 标签的优先级（与自定义规则重叠时比较），默认 0
+    /// 内置标签规则的优先级（与自定义规则重叠时比较），默认 0
     open var hTagPriority: Int = 0 {
         didSet {
             guard hTagPriority != oldValue else { return }
@@ -236,7 +303,7 @@ open class ZLTagRichLabel: ZLRichLabel {
         }
     }
 
-    /// 是否解析内置 `<h>` 标签，默认 true；设为 false 时只使用自定义规则
+    /// 是否解析内置标签，默认 true；设为 false 时只使用自定义规则
     open var parsesHTags: Bool = true {
         didSet {
             guard parsesHTags != oldValue else { return }
@@ -244,12 +311,42 @@ open class ZLTagRichLabel: ZLRichLabel {
         }
     }
 
+    /// 标签解析配置（Swift）：可识别的标签名、是否支持嵌套 / 自闭合。默认 `.hTags`（只识别 `<h>` / `<hN>`）。
+    /// 任意标签 + 嵌套 + 自闭合：`label.tagConfiguration = .anyTags`
+    @nonobjc open var tagConfiguration: ZLTagParserConfiguration = .hTags {
+        didSet {
+            guard tagConfiguration != oldValue else { return }
+            hTagRuleCache = nil
+            setNeedsReparse()
+        }
+    }
+
+    /// 可识别的标签名（正则，整体匹配，不区分大小写），默认 `h\\d*`；
+    /// 任意标签名可用 `ZLTagParserConfiguration.anyTagName`（`[a-z][a-z0-9_:-]*`）
+    open var tagNamePattern: String {
+        get { return tagConfiguration.namePattern }
+        set { tagConfiguration.namePattern = newValue }
+    }
+
+    /// 是否支持嵌套（`<b>粗 <color value="red">红</color></b>`），默认 false：只识别最内层，外层原样显示
+    open var allowsNestedTags: Bool {
+        get { return tagConfiguration.allowsNesting }
+        set { tagConfiguration.allowsNesting = newValue }
+    }
+
+    /// 是否支持自闭合空标签（`<br/>`、`<icon name="star"/>`），默认 false。
+    /// 前面有未闭合的同名标签时 `<h1/>` 始终作为闭合标签
+    open var allowsSelfClosingTags: Bool {
+        get { return tagConfiguration.allowsSelfClosing }
+        set { tagConfiguration.allowsSelfClosing = newValue }
+    }
+
     // MARK: 解析结果
 
-    /// 当前解析出的所有标签
+    /// 当前解析出的所有标签（先序：外层在前，内层标签的 `parent` 指向外层）
     public private(set) var tags: [HTagInfo] = []
 
-    /// 当前所有自定义规则的命中（不含内置 `<h>` 标签）
+    /// 当前所有自定义规则的命中（不含内置标签）
     public var ruleMatches: [TagRichMatch] {
         return matches.filter { !isHTagMatch($0) }
     }
@@ -257,15 +354,22 @@ open class ZLTagRichLabel: ZLRichLabel {
     // MARK: 内置规则
 
     private var hTagRuleCache: TagRichRule?
-    /// 标签命中位置 → 标签信息
-    private var tagInfoByLocation: [Int: HTagInfo] = [:]
+    private var tagExpression: ZLTagMarkupExpression?
+    /// 最外层标签的位置 → 标签元素
+    private var rootElementByLocation: [Int: ZLTagElement] = [:]
+    /// 标签元素 → 标签信息
+    private var infoByElement: [ObjectIdentifier: HTagInfo] = [:]
+    /// 最外层标签的位置 → 它的标签序号（用于判断缓存的渲染结果是否过期）
+    private var rootIndexByLocation: [Int: Int] = [:]
     private var parsedNotifyScheduled = false
 
-    /// `<h>` 标签规则（`hTagPriority` 变化时重新创建）
+    /// 内置标签规则（优先级或解析配置变化时重新创建）
     private var hTagRule: TagRichRule {
         if let rule = hTagRuleCache { return rule }
+        let expression = ZLTagMarkupExpression(configuration: tagConfiguration)
+        tagExpression = expression
         let rule = TagRichRule(name: ZLTagRichLabel.hTagRuleName,
-                               regex: HTagParser.tagRegex,
+                               regex: expression,
                                priority: hTagPriority) { [weak self] context in
             self?.renderTag(context)
         }
@@ -277,7 +381,7 @@ open class ZLTagRichLabel: ZLRichLabel {
         return super.builtInRules + (parsesHTags ? [hTagRule] : [])
     }
 
-    /// 标签相关配置变化：只重新渲染 `<h>` 标签，自定义规则的命中直接复用缓存（不执行 handler、不重建 View）
+    /// 标签相关配置变化：只重新渲染标签，自定义规则的命中直接复用缓存（不执行 handler、不重建 View）
     private func setNeedsTagRebuild() {
         setNeedsRebuild(forRuleNamed: ZLTagRichLabel.hTagRuleName)
     }
@@ -289,18 +393,35 @@ open class ZLTagRichLabel: ZLRichLabel {
     open override func didParse() {
         super.didParse()
         var infos: [HTagInfo] = []
-        var byLocation: [Int: HTagInfo] = [:]
-        for match in matches where isHTagMatch(match) {
-            let info = HTagParser.info(from: match.result, in: match.source as NSString, index: infos.count)
-            infos.append(info)
-            byLocation[match.range.location] = info
+        var byElement: [ObjectIdentifier: HTagInfo] = [:]
+        var roots: [Int: ZLTagElement] = [:]
+        var rootIndexes: [Int: Int] = [:]
+
+        let tagMatches = matches.filter { isHTagMatch($0) }
+        if let expression = tagExpression, let source = tagMatches.first?.source {
+            let ns = source as NSString
+            var documentRoots: [Int: ZLTagElement] = [:]
+            for root in expression.document(for: source).roots { documentRoots[root.range.location] = root }
+            for match in tagMatches {
+                guard let root = documentRoots[match.range.location] else { continue }
+                roots[match.range.location] = root
+                rootIndexes[match.range.location] = infos.count
+                for element in root.allElements {
+                    let parent = element.parent.flatMap { byElement[ObjectIdentifier($0)] }
+                    let info = ZLTagParser.makeInfo(element, in: ns, index: infos.count, parent: parent)
+                    byElement[ObjectIdentifier(element)] = info
+                    infos.append(info)
+                }
+            }
         }
         // 标签序号变了（前面的标签增删）时，缓存的渲染结果里的 HTagInfo 已过期
-        if tagInfoByLocation.contains(where: { old in byLocation[old.key].map { $0.index != old.value.index } ?? false }) {
+        if rootIndexByLocation.contains(where: { old in rootIndexes[old.key].map { $0 != old.value } ?? false }) {
             invalidateRenderCache(forRuleNamed: ZLTagRichLabel.hTagRuleName)
         }
         tags = infos
-        tagInfoByLocation = byLocation
+        infoByElement = byElement
+        rootElementByLocation = roots
+        rootIndexByLocation = rootIndexes
 
         guard onParsed != nil, !parsedNotifyScheduled else { return }
         parsedNotifyScheduled = true
@@ -312,11 +433,33 @@ open class ZLTagRichLabel: ZLRichLabel {
         }
     }
 
-    /// 内置 `<h>` 规则的渲染：样式 → tagSpanBuilder / tagWidgetBuilder → 点击与按下高亮
+    /// 内置标签规则的渲染：逐层合并样式 → tagSpanBuilder / tagWidgetBuilder → 每个标签单独的点击、长按与按下高亮
     private func renderTag(_ context: TagRichRuleContext) {
-        guard let info = tagInfoByLocation[context.match.range.location] else { return }
+        guard let root = rootElementByLocation[context.match.range.location] else { return }
+        let source = context.match.source as NSString
+        let output = NSMutableAttributedString()
+        var links: [(range: NSRange, info: HTagInfo)] = []
+        append(root, inherited: context.baseStyle, source: source, into: output, links: &links, context: context)
+        context.attributedString.setAttributedString(output)
 
-        var style = context.baseStyle.merging(tagStyle) { $1 }
+        // 外层先加、内层后加：重叠时内层优先
+        for (range, info) in links {
+            let onTap: (() -> Void)? = isTappable(info) ? { [weak self] in self?.dispatchTap(info) } : nil
+            let onLongPress: (() -> Void)? = onTagLongPress == nil ? nil : { [weak self] in self?.onTagLongPress?(info) }
+            context.addLink(range: range, highlightStyle: tagHighlightStyles[info.name], onTap: onTap, onLongPress: onLongPress)
+        }
+    }
+
+    /// 渲染一个标签（含内层标签）并追加到 output，记录它在 output 中的范围
+    private func append(_ element: ZLTagElement, inherited: HTagTextStyle, source: NSString,
+                        into output: NSMutableAttributedString, links: inout [(range: NSRange, info: HTagInfo)],
+                        context: TagRichRuleContext) {
+        guard let info = infoByElement[ObjectIdentifier(element)] else {
+            output.append(NSAttributedString(string: source.substring(with: element.range), attributes: inherited))
+            return
+        }
+        // 样式：外层样式 → tagStyle → tagStyles[name] → tagStyleBuilder(info)
+        var style = inherited.merging(tagStyle) { $1 }
         if let byName = tagStyles[info.name] {
             style.merge(byName) { $1 }
         }
@@ -324,40 +467,33 @@ open class ZLTagRichLabel: ZLRichLabel {
             style.merge(extra) { $1 }
         }
 
-        if isTappable(info) {
-            context.onTap = { [weak self] in self?.dispatchTap(info) }
-            context.highlightStyle = tagHighlightStyles[info.name]
-        }
-        if onTagLongPress != nil {
-            context.onLongPress = { [weak self] in self?.onTagLongPress?(info) }
-        }
+        let start = output.length
+        let slot = links.count
+        links.append((NSRange(location: start, length: 0), info))
 
-        // 1. 完全自定义
+        // 1. 完全自定义（包含内层标签）
         if let custom = tagSpanBuilder?(info, style) {
-            context.attributedString.setAttributedString(custom)
-            return
+            output.append(custom)
+        } else {
+            // 2. 自定义 View：替换 / 放在内容前 / 放在内容后
+            let widget = tagWidgetBuilder?(info, style)
+            let widgetSpan = widget.map { context.attachmentString(for: $0, style: style) }
+            if let span = widgetSpan, widget?.position == .replace {
+                output.append(span)
+            } else {
+                if let span = widgetSpan, widget?.position == .before { output.append(span) }
+                for child in element.children {
+                    switch child {
+                    case .text(let range):
+                        output.append(NSAttributedString(string: source.substring(with: range), attributes: style))
+                    case .element(let inner):
+                        append(inner, inherited: style, source: source, into: output, links: &links, context: context)
+                    }
+                }
+                if let span = widgetSpan, widget?.position == .after { output.append(span) }
+            }
         }
-
-        let textSpan = NSAttributedString(string: info.text, attributes: style)
-
-        // 2. 自定义 View
-        guard let widget = tagWidgetBuilder?(info, style) else {
-            context.attributedString.setAttributedString(textSpan)
-            return
-        }
-        let widgetSpan = context.attachmentString(for: widget, style: style)
-        let output = NSMutableAttributedString()
-        switch widget.position {
-        case .replace:
-            output.append(widgetSpan)
-        case .before:
-            output.append(widgetSpan)
-            output.append(textSpan)
-        case .after:
-            output.append(textSpan)
-            output.append(widgetSpan)
-        }
-        context.attributedString.setAttributedString(output)
+        links[slot].range = NSRange(location: start, length: output.length - start)
     }
 
     /// 标签是否可点击：有对应标签名的 handler 或设置了 onTagTap

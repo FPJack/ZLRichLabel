@@ -105,6 +105,8 @@ final class HTagDemoPage: UIViewController {
         case25()
         // 选中复制
         case26()
+        // 通用标签：任意标签名 / 属性 / 嵌套
+        case27()
         stackView.addArrangedSubview(historyCard)
 
         refreshTapViews()
@@ -793,6 +795,60 @@ final class HTagDemoPage: UIViewController {
         case22Label?.adjustsFontForContentSizeCategory = sender.isOn
     }
 
+    // MARK: - 通用标签
+
+    /// 27. 通用标签：任意标签名、标签属性、嵌套、自闭合
+    private func case27() {
+        let name = "27. 通用标签（任意标签名 / 属性 / 嵌套）"
+        let source = "支持 <b>粗体</b>、<i>斜体</i>、<u>下划线</u>、<color value=\"#E91E63\">任意颜色</color>、"
+            + "<size value=\"20\">字号</size>。可以嵌套：<b>粗体里 <color value=\"#2196F3\">蓝色 <u>加下划线</u></color></b>。"
+            + "链接 <a href=\"https://github.com\">GitHub</a>，图标 <icon name=\"star.fill\" color=\"orange\"/>，"
+            + "换行<br/>容错：<b>未闭合的 <i>标签</b> 原样显示，多余的 </u> 也原样显示。"
+
+        addCase(name, source: source) { [weak self] v in
+            // 识别任意标签名，支持嵌套和自闭合（默认只识别 <h> / <hN>）
+            v.tagConfiguration = .anyTags
+            v.tagStyles = [
+                "b": [.font: UIFont.boldSystemFont(ofSize: 15)],
+                "i": [.font: UIFont.italicSystemFont(ofSize: 15)],
+                "u": [.underlineStyle: NSUnderlineStyle.single.rawValue],
+                "a": [.foregroundColor: UIColor.mBlue, .underlineStyle: NSUnderlineStyle.single.rawValue],
+            ]
+            // 按属性设置样式：<color value="…">、<size value="…">
+            v.tagStyleBuilder = { info in
+                var style: HTagTextStyle = [:]
+                if info.name == "color", let color = info.colorAttribute("value") {
+                    style[.foregroundColor] = color
+                }
+                if info.name == "size", let size = info.attribute("value").flatMap(Double.init) {
+                    style[.font] = UIFont.systemFont(ofSize: CGFloat(size))
+                }
+                return style
+            }
+            // 自闭合标签：<br/> 换行
+            v.tagSpanBuilder = { info, style in
+                info.name == "br" ? NSAttributedString(string: "\n", attributes: style) : nil
+            }
+            // 自闭合标签：<icon name="…" color="…"/> 显示 SF Symbol
+            v.tagWidgetBuilder = { info, _ in
+                guard info.name == "icon", let symbol = info.attribute("name") else { return nil }
+                let icon = UIImageView(image: UIImage(systemName: symbol))
+                icon.tintColor = info.colorAttribute("color") ?? .mGrey
+                icon.contentMode = .scaleAspectFit
+                return HTagWidget(view: icon, size: CGSize(width: 16, height: 16))
+            }
+            // <a> 读取 href；其他标签走 onTagTap（内层标签优先响应点击）
+            v.tagTapHandlers = ["a": { info in
+                self?.onTap(name, info, action: "打开 \(info.attribute("href") ?? "")")
+            }]
+            v.onTagTap = { info in
+                let path = sequence(first: info) { $0.parent }.map { "<\($0.name)>" }.reversed().joined(separator: " › ")
+                self?.onTap(name, info, action: "onTagTap  \(path)")
+            }
+            v.tagHighlightStyles = ["br": [:], "icon": [:]]
+        }
+    }
+
     // MARK: - 选中复制
 
     /// 26. 选中复制：长按选词、拖动 / 拖柄调整范围，菜单「复制 / 复制原文 / 全选」
@@ -1376,7 +1432,12 @@ private final class DemoCard: CardView {
         parsedLabel.isHidden = parsed.isEmpty
         parsedTitle.text = "onParsed 回调（共 \(parsed.count) 个标签）："
         parsedLabel.text = parsed.map { t in
-            "#\(t.index)  <\(t.name)>  text=\"\(t.text)\"  level=\(t.level.map { "\($0)" } ?? "null")"
+            // 嵌套的标签按深度缩进，有属性时一并显示
+            let indent = String(repeating: "    ", count: t.depth)
+            let attrs = t.attributes.isEmpty ? "" : "  attributes=" + t.attributes.sorted { $0.key < $1.key }
+                .map { "\($0.key)=\"\($0.value)\"" }.joined(separator: " ")
+            let level = t.name.hasPrefix("h") ? "  level=\(t.level.map { "\($0)" } ?? "null")" : ""
+            return "\(indent)#\(t.index)  <\(t.name)>  text=\"\(t.text)\"\(level)\(attrs)"
         }.joined(separator: "\n")
     }
 }

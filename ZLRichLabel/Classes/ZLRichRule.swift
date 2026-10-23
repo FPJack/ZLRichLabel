@@ -131,6 +131,20 @@ public final class TagRichRuleContext: NSObject {
     /// 按下高亮样式，nil 时使用 `ZLRichLabel.highlightStyle`；`[:]` 表示不高亮
     public var highlightStyle: HTagTextStyle?
 
+    /// 通过 `addLink` 添加的分段点击 / 长按
+    private(set) var links: [ZLRuleLink] = []
+
+    /// 给展示内容中的一段（相对 `attributedString` 的范围）单独设置点击 / 长按 / 按下高亮。
+    /// 可以添加多段、可以互相包含：范围重叠时后添加的优先（例如嵌套标签先加外层、再加内层）。
+    /// 范围内的图片 / tappable 的 View 点击时同样触发这一段的 `onTap`。
+    /// 没有被任何一段覆盖的位置使用整体的 `onTap` / `onLongPress`
+    @objc(addLinkWithRange:highlightStyle:onTap:onLongPress:)
+    public func addLink(range: NSRange, highlightStyle: HTagTextStyle? = nil,
+                        onTap: (() -> Void)?, onLongPress: (() -> Void)? = nil) {
+        guard range.location != NSNotFound, range.length > 0, onTap != nil || onLongPress != nil else { return }
+        links.append(ZLRuleLink(range: range, highlightStyle: highlightStyle, onTap: onTap, onLongPress: onLongPress))
+    }
+
     /// 由 label 注入：生成 View 占位富文本（仅在 handler 执行期间有效）
     var attachmentFactory: ((HTagWidget, HTagTextStyle) -> NSAttributedString)?
 
@@ -172,6 +186,21 @@ public final class TagRichRuleContext: NSObject {
     @objc(attachmentStringForWidget:style:)
     public func attachmentString(for widget: HTagWidget, style: HTagTextStyle? = nil) -> NSAttributedString {
         return attachmentFactory?(widget, style ?? baseStyle) ?? NSAttributedString()
+    }
+}
+
+/// 命中内容中的一段点击 / 长按（见 `TagRichRuleContext.addLink`）
+final class ZLRuleLink {
+    let range: NSRange
+    let highlightStyle: HTagTextStyle?
+    let onTap: (() -> Void)?
+    let onLongPress: (() -> Void)?
+
+    init(range: NSRange, highlightStyle: HTagTextStyle?, onTap: (() -> Void)?, onLongPress: (() -> Void)?) {
+        self.range = range
+        self.highlightStyle = highlightStyle
+        self.onTap = onTap
+        self.onLongPress = onLongPress
     }
 }
 

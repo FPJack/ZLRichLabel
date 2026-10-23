@@ -15,14 +15,14 @@
 - **表情与模板**：`[smile]` 替换为图片，`{{name}}` 替换为变量值
 - **行内控件**：文字中嵌入按钮、徽章、勾选框、计数器等任意 `UIView`，尺寸变化后自动重新排版
 - **多语言**：阿拉伯语 / 希伯来语等 RTL 文本与双向混排
-- **轻量标记**：简易 Markdown（加粗、删除线、行内代码）等自定义语法
+- **轻量标记**：简易 Markdown（加粗、删除线、行内代码），或 `<b>`、`<color value="#f00">`、`<a href="…">` 这类可嵌套的 HTML 风格标签
 
 Swift 与 Objective-C 均可使用，基于 [TTTAttributedLabel](https://github.com/TTTAttributedLabel/TTTAttributedLabel)，分为两层：
 
 | 类 | 作用 |
 | --- | --- |
 | `ZLRichLabel` | 基类。用**正则规则**解析文本，命中内容交给外部渲染（样式 / 替换文字 / 图片 / 自定义 View / 点击 / 按下高亮），重叠时按优先级取舍 |
-| `ZLTagRichLabel` | 继承 `ZLRichLabel`。内置 `<h>`、`<h1>`、`<h2>` … 标签规则，按标签名区分样式、按下高亮与点击，常用于「用户协议 / 隐私政策」之类的高亮文案 |
+| `ZLTagRichLabel` | 继承 `ZLRichLabel`。内置标签规则：默认识别 `<h>`、`<h1>`、`<h2>` …，也可以识别任意标签名、读取标签属性、支持嵌套；按标签名区分样式、按下高亮与点击，常用于「用户协议 / 隐私政策」之类的高亮文案 |
 
 ```text
 "I agree to the <h1>User Agreement</h1> and <h2>Privacy Policy</h2>. cc @alice"
@@ -38,6 +38,7 @@ Swift 与 Objective-C 均可使用，基于 [TTTAttributedLabel](https://github.
 - 自定义 View 尺寸 / 内容变化后自动重新排版
 - 点击与按下高亮：整段可点击（包括其中的图片 / View），可按规则 / 标签名设置不同的高亮样式
 - `<h>` 标签：`<h>`、`<h1>`…`<hN>`，`</h1>` 和 `<h1/>` 两种闭合写法，不区分大小写；按标签名区分样式与点击；可替换为自定义 View
+- 通用标签：可识别任意标签名（`<b>`、`<a href="…">`、`<color value="#f00">`），解析标签属性，支持嵌套（内层继承外层样式、点击内层优先）和自闭合标签（`<br/>`、`<icon name="star"/>`）
 - 容错：开闭不匹配、未闭合的标签原样显示，不影响后面的标签
 - 多行截断（自定义省略符）、Auto Layout 自适应高度
 - 展开 / 收起：截断时末尾显示可点击的「… 全文」，展开后显示「收起」
@@ -68,7 +69,8 @@ ZLRichLabel/Classes/
 ├── ZLRichRule.swift       TagRichRule / TagRichMatch / TagRichRuleContext / TagRichParser
 ├── ZLRichLabel.swift      基类：规则解析、渲染、内嵌 View、布局、截断、RTL、手势
 ├── ZLRichLabel+Selection.swift  选中复制：选中范围、拖柄、菜单、展示文字与原文的对应
-└── ZLTagRichLabel.swift   <h> 标签子类、HTagInfo、HTagParser
+├── ZLTagParser.swift      通用标签解析：任意标签名、属性、嵌套、自闭合、容错
+└── ZLTagRichLabel.swift   标签子类、HTagInfo、HTagParser
 ```
 
 ## 快速开始
@@ -157,6 +159,7 @@ handler 通过 `ctx` 读取命中信息，并写入要展示的内容：
 | `attachmentString(for:style:)` | 生成自定义 View 的占位富文本，拼进 `attributedString` 即可在该位置显示 View |
 | `onTap` | 设置后整段可点击（含其中的图片和 `tappable` 的 View） |
 | `onLongPress` | 长按这段内容时回调（设置后不再回调 label 的 `onLongPress`） |
+| `addLink(range:highlightStyle:onTap:onLongPress:)` | 给内容中的一段单独设置点击 / 长按 / 按下高亮；可以添加多段、可以互相包含，重叠时后添加的优先（嵌套标签就是先加外层、再加内层） |
 | `highlightStyle` | 按下高亮，`nil` 使用 label 的 `highlightStyle`，`[:]` 不高亮 |
 
 插入图片：直接放 `NSTextAttachment` 即可，组件会自动转换成 `UIImageView` 显示（TTTAttributedLabel 本身不绘制 attachment）：
@@ -232,7 +235,9 @@ label.matches    // [TagRichMatch]：最终生效的命中（含内置规则）
 TagRichParser.resolve(text, rules: rules)   // 不创建 label，单独执行解析
 ```
 
-## `<h>` 标签（ZLTagRichLabel）
+## 标签（ZLTagRichLabel）
+
+默认只识别 `<h>` / `<hN>`；需要任意标签名、属性或嵌套时见 [通用标签](#通用标签任意标签名--属性--嵌套)。
 
 ### 写法
 
@@ -245,6 +250,8 @@ TagRichParser.resolve(text, rules: rules)   // 不创建 label，单独执行解
 | `<h1>a<h2>b</h2>c</h1>` | 不支持嵌套，只识别最内层 `<h2>b</h2>` |
 | `<hx>文字</hx>` | 不是 h 标签，原样显示 |
 
+以上是默认配置下的行为；开启 `allowsNestedTags` 后 `<h1>a<h2>b</h2>c</h1>` 会识别为嵌套的两个标签。
+
 ### HTagInfo
 
 | 属性 | 说明 |
@@ -254,6 +261,12 @@ TagRichParser.resolve(text, rules: rules)   // 不创建 label，单独执行解
 | `level` | `h` 后的数字，`<h>` 为 `nil` |
 | `text` | 标签内文字 |
 | `raw` | 完整原始标签字符串 |
+| `attributes` | 标签属性（名称小写），`<a href="x" target=_blank disabled>` → `["href": "x", "target": "_blank", "disabled": ""]` |
+| `attribute(_:)` | 读取属性，名称不区分大小写 |
+| `colorAttribute(_:)` | 把属性值解析为颜色：`#rgb`、`#rrggbb`、`#rrggbbaa`（`#` 可省略）或 red、blue、gray 等颜色名 |
+| `parent` / `depth` | 外层标签 / 嵌套深度（最外层为 `nil` / 0） |
+
+嵌套时 `text` 是去掉内层标签后的纯文字：`<b>粗 <i>斜</i></b>` 的 `<b>` 为 `粗 斜`。
 
 ### 样式
 
@@ -324,6 +337,62 @@ label.tagHighlightStyles = [
 
 `tagTapHandlers` 和 `onTagTap` 都没有处理的标签不可点击。
 
+### 通用标签（任意标签名 / 属性 / 嵌套）
+
+```swift
+label.tagConfiguration = .anyTags      // 任意标签名 + 嵌套 + 自闭合
+// 或分别设置（Objective-C 也可用）：
+label.tagNamePattern = ZLTagParserConfiguration.anyTagName   // 标签名正则，整体匹配，不区分大小写；默认 "h\\d*"
+label.allowsNestedTags = true          // 默认 false
+label.allowsSelfClosingTags = true     // 默认 false
+```
+
+只想识别几种标签时，`tagNamePattern` 可以写成 `"b|i|u|color|a"`，其他标签原样显示。
+
+样式、自定义内容、点击都和 `<h>` 一样按标签名配置，属性在 `HTagInfo` 里读取：
+
+```swift
+label.tagStyles = [
+    "b": [.font: UIFont.boldSystemFont(ofSize: 15)],
+    "a": [.foregroundColor: UIColor.systemBlue, .underlineStyle: NSUnderlineStyle.single.rawValue],
+]
+label.tagStyleBuilder = { info in                       // <color value="#f00">
+    info.colorAttribute("value").map { [.foregroundColor: $0] }
+}
+label.tagSpanBuilder = { info, style in                 // <br/>
+    info.name == "br" ? NSAttributedString(string: "\n", attributes: style) : nil
+}
+label.tagWidgetBuilder = { info, _ in                   // <icon name="star.fill"/>
+    guard info.name == "icon", let name = info.attribute("name") else { return nil }
+    return HTagWidget(view: UIImageView(image: UIImage(systemName: name)), size: CGSize(width: 16, height: 16))
+}
+label.setTapHandler({ info in print("open", info.attribute("href") ?? "") }, forTag: "a")
+label.text = "<b>粗体里 <color value=\"#2196F3\">蓝色 <a href=\"https://github.com\">链接</a></color></b><br/><icon name=\"star.fill\"/>"
+```
+
+嵌套规则：
+
+- **样式**：内层在外层样式的基础上继续 merge（外层样式 → `tagStyle` → `tagStyles[name]` → `tagStyleBuilder(info)`），所以蓝色的链接同时是粗体。
+- **点击 / 长按 / 按下高亮**：每个标签单独响应，点在内层范围内只触发内层，其余位置触发外层。
+- **`tagSpanBuilder` 返回非 nil 时**，它返回的内容会替换整个标签（包括内层标签），内层不再单独渲染。
+- `tags` / `onParsed` 按先序排列（外层在前），内层的 `parent` 指向外层。
+
+容错：
+
+| 写法 | 结果 |
+| --- | --- |
+| `<b>a <i>b</b>` | `<i>` 未闭合，原样显示 `<i>`；`<b>` 正常 |
+| `</u>`、`<b>x</i>` | 多余或不匹配的闭合标签原样显示 |
+| `<br/>`（`allowsSelfClosingTags == false`） | 原样显示 |
+| `<h1>文字<h1/>` | 前面有未闭合的同名标签时，`<h1/>` 始终作为闭合标签 |
+| 属性值 | 支持双引号、单引号、无引号、无值；会解码 `&quot;` `&#39;` `&lt;` `&gt;` `&amp;` |
+
+不创建 label、单独解析：
+
+```swift
+ZLTagParser.tags(in: source, configuration: .anyTags)   // [HTagInfo]，外层在前
+```
+
 ### 其他
 
 ```swift
@@ -331,7 +400,7 @@ label.parsesHTags = false            // 关闭 <h> 解析，只用自定义规�
 label.onParsed = { tags in ... }     // 解析完成后异步回调所有标签
 label.tags                           // 当前所有标签 [HTagInfo]
 label.ruleMatches                    // 当前所有自定义规则命中（不含 <h> 标签）
-HTagParser.tags("<h1>a</h1>")        // 独立解析，不创建 label
+HTagParser.tags("<h1>a</h1>")        // 独立解析 <h> 标签，不创建 label
 ```
 
 ## 通用配置
@@ -588,6 +657,9 @@ label.numberOfLines = 0;
 | `characterIndex(at:)` / `match(at:)` / `gestureInfo(at:)` | `characterIndexAtPoint:` / `matchAtPoint:` / `gestureInfoAtPoint:` |
 | `select(range:)` / `rawText(forDisplayRange:)` / `copySelection(raw:)` | `selectRange:` / `rawTextForDisplayRange:` / `copySelectionRaw:` |
 | `onCopy = { text, isRaw in }` | `onCopy = ^(NSString *text, BOOL isRaw) {}` |
+| `tagConfiguration = .anyTags` | `tagNamePattern = HTagParser.anyTagNamePattern; allowsNestedTags = YES; allowsSelfClosingTags = YES;` |
+| `info.attribute("href")` / `info.colorAttribute("value")` | `[info attributeNamed:@"href"]` / `[info colorAttributeNamed:@"value"]` |
+| `ZLTagParser.tags(in:configuration:)` | `[HTagParser tagsInString:namePattern:allowsNesting:allowsSelfClosing:]` |
 
 ## Example
 
@@ -612,6 +684,7 @@ open ZLRichLabel.xcworkspace
 | 24 | 展开 / 收起：3 行截断显示「… 全文」，展开后显示「收起」；内容不足 3 行时不显示按钮 |
 | 25 | 长按菜单（复制原文 / 展示文字、举报）、@提及与标签各自的长按、双击点赞、扩大点击热区 |
 | 26 | 选中复制：长按选词、拖柄调整，「复制」展示文字 /「复制原文」，下方实时显示 selectedText / selectedRawText |
+| 27 | 通用标签：`<b>` `<i>` `<u>` `<color value>` `<size value>` `<a href>`、自闭合 `<br/>` `<icon/>`、嵌套（内层继承外层样式、点击内层优先）、容错；卡片下方按嵌套缩进显示属性 |
 
 页面顶部会显示最近一次点击得到的完整信息，底部有点击历史。
 

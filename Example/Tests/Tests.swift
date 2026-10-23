@@ -772,3 +772,114 @@ class SelectionTests: XCTestCase {
         XCTAssertFalse(label.canPerformAction(#selector(UIResponderStandardEditActions.copy(_:)), withSender: nil))
     }
 }
+
+// MARK: - 通用标签
+
+class TagParserTests: XCTestCase {
+
+    private func describe(_ tags: [HTagInfo]) -> [String] {
+        return tags.map { "\($0.name):\($0.text):\($0.depth)" }
+    }
+
+    func testDefaultConfigurationKeepsHTagBehavior() {
+        // 不嵌套：只识别最内层
+        XCTAssertEqual(describe(ZLTagParser.tags(in: "<h1>a<h2>b</h2></h1>")), ["h2:b:0"])
+        // 开闭不匹配 / 未闭合：原样显示，不影响后面的标签
+        XCTAssertEqual(describe(ZLTagParser.tags(in: "<h1>x</h2> and <h3>ok</h3>")), ["h3:ok:0"])
+        // <h1/> 作为闭合标签
+        XCTAssertEqual(describe(ZLTagParser.tags(in: "<H1>文字<h1/>")), ["h1:文字:0"])
+        // 不符合标签名的当作文字
+        XCTAssertEqual(describe(ZLTagParser.tags(in: "<hx>y</hx><b>z</b>")), [])
+        // 与旧解析器结果一致
+        let source = "agree <h1>User Agreement</h1>, <h2>Privacy<h2/> <h>x</h1> <h3>a</h3>"
+        XCTAssertEqual(describe(ZLTagParser.tags(in: source)), describe(HTagParser.tags(source)))
+    }
+
+    func testAnyTagsWithAttributesAndNesting() {
+        let source = "<b>粗 <color value=\"#f00\">红</color> <A HREF='https://x.com?a=1&amp;b=2' target=_blank disabled>链接</a></b><br/>"
+        let tags = ZLTagParser.tags(in: source, configuration: .anyTags)
+        XCTAssertEqual(describe(tags), ["b:粗 红 链接:0", "color:红:1", "a:链接:1", "br::0"])
+        XCTAssertEqual(tags.map { $0.index }, [0, 1, 2, 3])
+        XCTAssertTrue(tags[1].parent === tags[0])
+        XCTAssertTrue(tags[2].parent === tags[0])
+        XCTAssertNil(tags[3].parent)
+
+        XCTAssertEqual(tags[2].attributes, ["href": "https://x.com?a=1&b=2", "target": "_blank", "disabled": ""])
+        XCTAssertEqual(tags[2].attribute("HREF"), "https://x.com?a=1&b=2")
+        XCTAssertEqual(tags[1].colorAttribute("value"), UIColor(red: 1, green: 0, blue: 0, alpha: 1))
+        XCTAssertEqual(tags[3].raw, "<br/>")
+        XCTAssertEqual(HTagInfo.color(from: "blue"), .systemBlue)
+        XCTAssertNil(HTagInfo.color(from: "#12"))
+    }
+
+    func testNestingTolerance() {
+        // 内层未闭合：外层闭合时放弃内层（原样显示）
+        let tags = ZLTagParser.tags(in: "<b>a <i>b</b> <i>c</i>", configuration: .anyTags)
+        XCTAssertEqual(describe(tags), ["b:a <i>b:0", "i:c:0"])
+        // 多余的闭合标签当作文字
+        XCTAssertEqual(describe(ZLTagParser.tags(in: "</b><b>x</b></i>", configuration: .anyTags)), ["b:x:0"])
+        // 不允许自闭合时 <br/> 当作文字
+        var config = ZLTagParserConfiguration.anyTags
+        config.allowsSelfClosing = false
+        XCTAssertEqual(describe(ZLTagParser.tags(in: "a<br/>b", configuration: config)), [])
+    }
+
+    // MARK: Label
+
+    private func makeLabel(_ text: String, taps: @escaping (HTagInfo) -> Void) -> ZLTagRichLabel {
+        let label = ZLTagRichLabel(frame: CGRect(x: 0, y: 0, width: 320, height: 0))
+        label.numberOfLines = 0
+        label.update { v in
+            v.style = [.font: UIFont.systemFont(ofSize: 15), .foregroundColor: UIColor.darkGray]
+            v.tagConfiguration = .anyTags
+            v.tagStyles = ["b": [.font: UIFont.boldSystemFont(ofSize: 15)]]
+            v.tagStyleBuilder = { info in
+                info.colorAttribute("value").map { [.foregroundColor: $0] }
+            }
+            v.onTagTap = taps
+            v.text = text
+        }
+        let size = label.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude))
+        label.frame.size.height = size.height
+        return label
+    }
+
+    /// 与 TTT 一致：倒序查找，后添加的链接优先
+    private func tap(_ label: ZLTagRichLabel, at index: Int) {
+        let models = ((label.value(forKey: "linkModels") as? [Any]) ?? []).compactMap { $0 as? TTTAttributedLabelLink }
+        guard let link = models.last(where: { NSLocationInRange(index, $0.result.range) }) else {
+            return XCTFail("no link at \(index)")
+        }
+        link.linkTapBlock?(label, link)
+    }
+
+    func testLabelRendersNestedTagsWithInheritedStyle() {
+        var tapped: [String] = []
+        let label = makeLabel("Hi <b>粗 <color value=\"red\">红</color></b>!", taps: { tapped.append($0.name) })
+        let display = label.attributedText.string as NSString
+        XCTAssertEqual(display as String, "Hi 粗 红!")
+        XCTAssertEqual(label.tags.map { $0.name }, ["b", "color"])
+
+        let red = display.range(of: "红").location
+        let attrs = label.attributedText.attributes(at: red, effectiveRange: nil)
+        XCTAssertEqual(attrs[.foregroundColor] as? UIColor, .systemRed, "内层颜色")
+        let font = attrs[.font] as? UIFont
+        XCTAssertTrue(font?.fontDescriptor.symbolicTraits.contains(.traitBold) ?? false, "继承外层粗体")
+
+        let boldOnly = display.range(of: "粗").location
+        XCTAssertEqual(label.attributedText.attribute(.foregroundColor, at: boldOnly, effectiveRange: nil) as? UIColor,
+                       .darkGray)
+
+        // 点内层触发内层，点外层触发外层
+        tap(label, at: red)
+        tap(label, at: boldOnly)
+        XCTAssertEqual(tapped, ["color", "b"])
+    }
+
+    func testDefaultLabelStillOnlyParsesHTags() {
+        let label = ZLTagRichLabel(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        label.text = "<b>x</b> <h1>y</h1>"
+        XCTAssertEqual(label.attributedText.string, "<b>x</b> y")
+        XCTAssertEqual(label.tags.map { $0.name }, ["h1"])
+    }
+}

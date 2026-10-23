@@ -431,8 +431,17 @@ static NSString *OCQuote(NSString *s) {
     _parsedTitle.text = [NSString stringWithFormat:@"onParsed 回调（共 %lu 个标签）：", (unsigned long)parsed.count];
     NSMutableArray<NSString *> *lines = [NSMutableArray array];
     for (HTagInfo *t in parsed) {
-        [lines addObject:[NSString stringWithFormat:@"#%ld  <%@>  text=\"%@\"  level=%@",
-                          (long)t.index, t.name, t.text, t.level ? t.level.stringValue : @"null"]];
+        // 嵌套的标签按深度缩进，有属性时一并显示
+        NSString *indent = [@"" stringByPaddingToLength:t.depth * 4 withString:@" " startingAtIndex:0];
+        NSString *level = [t.name hasPrefix:@"h"]
+            ? [NSString stringWithFormat:@"  level=%@", t.level ? t.level.stringValue : @"null"] : @"";
+        NSMutableArray<NSString *> *pairs = [NSMutableArray array];
+        for (NSString *key in [t.attributes.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+            [pairs addObject:[NSString stringWithFormat:@"%@=\"%@\"", key, t.attributes[key]]];
+        }
+        NSString *attrs = pairs.count ? [@"  attributes=" stringByAppendingString:[pairs componentsJoinedByString:@" "]] : @"";
+        [lines addObject:[NSString stringWithFormat:@"%@#%ld  <%@>  text=\"%@\"%@%@",
+                          indent, (long)t.index, t.name, t.text, level, attrs]];
     }
     _parsedLabel.text = [lines componentsJoinedByString:@"\n"];
 }
@@ -605,6 +614,8 @@ static NSString *OCQuote(NSString *s) {
     [self case25];
     // 选中复制
     [self case26];
+    // 通用标签：任意标签名 / 属性 / 嵌套
+    [self case27];
     [self.stackView addArrangedSubview:self.historyCard];
 
     [self refreshTapViews];
@@ -1341,6 +1352,67 @@ static NSString *OCQuote(NSString *s) {
 
 - (void)scaleSwitchChanged22:(UISwitch *)sender {
     self.case22Label.adjustsFontForContentSizeCategory = sender.isOn;
+}
+
+#pragma mark - 通用标签
+
+/// 27. 通用标签：任意标签名、标签属性、嵌套、自闭合
+- (void)case27 {
+    NSString *name = @"27. 通用标签（任意标签名 / 属性 / 嵌套）";
+    NSString *source = @"支持 <b>粗体</b>、<i>斜体</i>、<u>下划线</u>、<color value=\"#E91E63\">任意颜色</color>、"
+        @"<size value=\"20\">字号</size>。可以嵌套：<b>粗体里 <color value=\"#2196F3\">蓝色 <u>加下划线</u></color></b>。"
+        @"链接 <a href=\"https://github.com\">GitHub</a>，图标 <icon name=\"star.fill\" color=\"orange\"/>，"
+        @"换行<br/>容错：<b>未闭合的 <i>标签</b> 原样显示，多余的 </u> 也原样显示。";
+
+    __weak typeof(self) weakSelf = self;
+    [self addCase:name source:source configure:^(ZLTagRichLabel *v) {
+        // 识别任意标签名，支持嵌套和自闭合（默认只识别 <h> / <hN>）
+        v.tagNamePattern = HTagParser.anyTagNamePattern;
+        v.allowsNestedTags = YES;
+        v.allowsSelfClosingTags = YES;
+        v.tagStyles = @{
+            @"b": @{NSFontAttributeName: [UIFont boldSystemFontOfSize:15]},
+            @"i": @{NSFontAttributeName: [UIFont italicSystemFontOfSize:15]},
+            @"u": @{NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)},
+            @"a": @{NSForegroundColorAttributeName: kBlue, NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)},
+        };
+        // 按属性设置样式：<color value="…">、<size value="…">
+        v.tagStyleBuilder = ^NSDictionary<NSAttributedStringKey, id> *(HTagInfo *info) {
+            NSMutableDictionary *style = [NSMutableDictionary dictionary];
+            UIColor *color = [info.name isEqualToString:@"color"] ? [info colorAttributeNamed:@"value"] : nil;
+            if (color) style[NSForegroundColorAttributeName] = color;
+            NSString *size = [info.name isEqualToString:@"size"] ? [info attributeNamed:@"value"] : nil;
+            if (size.doubleValue > 0) style[NSFontAttributeName] = [UIFont systemFontOfSize:size.doubleValue];
+            return style;
+        };
+        // 自闭合标签：<br/> 换行
+        v.tagSpanBuilder = ^NSAttributedString *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+            return [info.name isEqualToString:@"br"] ? [[NSAttributedString alloc] initWithString:@"\n" attributes:style] : nil;
+        };
+        // 自闭合标签：<icon name="…" color="…"/> 显示 SF Symbol
+        v.tagWidgetBuilder = ^HTagWidget *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+            NSString *symbol = [info attributeNamed:@"name"];
+            if (![info.name isEqualToString:@"icon"] || symbol == nil) return nil;
+            UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:symbol]];
+            icon.tintColor = [info colorAttributeNamed:@"color"] ?: kGrey;
+            icon.contentMode = UIViewContentModeScaleAspectFit;
+            return [HTagWidget widgetWithView:icon size:CGSizeMake(16, 16) position:HTagWidgetPositionReplace];
+        };
+        // <a> 读取 href；其他标签走 onTagTap（内层标签优先响应点击）
+        [v setTapHandler:^(HTagInfo *info) {
+            [weakSelf onTap:name info:info
+                     action:[NSString stringWithFormat:@"打开 %@", [info attributeNamed:@"href"] ?: @""]];
+        } forTag:@"a"];
+        v.onTagTap = ^(HTagInfo *info) {
+            NSMutableArray<NSString *> *path = [NSMutableArray array];
+            for (HTagInfo *t = info; t != nil; t = t.parent) {
+                [path insertObject:[NSString stringWithFormat:@"<%@>", t.name] atIndex:0];
+            }
+            [weakSelf onTap:name info:info
+                     action:[@"onTagTap  " stringByAppendingString:[path componentsJoinedByString:@" › "]]];
+        };
+        v.tagHighlightStyles = @{@"br": @{}, @"icon": @{}};
+    }];
 }
 
 #pragma mark - 选中复制

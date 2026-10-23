@@ -331,6 +331,8 @@ open class ZLRichLabel: TTTAttributedLabel {
         let originalFont: UIFont
         /// `HTagWidget.size == .zero`：尺寸由 View 自身计算，内容变化后可重新测量
         let autoSize: Bool
+        /// 是否给 View 加点击（触发所在范围的 onTap）
+        var tappable = true
         private(set) var size: CGSize = .zero
         private(set) var ascent: CGFloat = 0
         private(set) var descent: CGFloat = 0
@@ -403,9 +405,11 @@ open class ZLRichLabel: TTTAttributedLabel {
         let onLongPress: (() -> Void)?
         let highlightStyle: HTagTextStyle?
         let attachments: [Attachment]
+        /// 分段点击 / 长按（范围相对 content，后面的优先）
+        let links: [ZLRuleLink]
 
         init(match: TagRichMatch, content: NSAttributedString, onTap: (() -> Void)?, onLongPress: (() -> Void)?,
-             highlightStyle: HTagTextStyle?, attachments: [Attachment]) {
+             highlightStyle: HTagTextStyle?, attachments: [Attachment], links: [ZLRuleLink]) {
             self.matchInfo = match
             self.rule = match.rule
             self.range = match.range
@@ -414,6 +418,7 @@ open class ZLRichLabel: TTTAttributedLabel {
             self.content = content
             self.onTap = onTap
             self.onLongPress = onLongPress
+            self.links = links
             self.highlightStyle = highlightStyle
             self.attachments = attachments
         }
@@ -736,6 +741,11 @@ open class ZLRichLabel: TTTAttributedLabel {
             if let onTap = rendered.onTap, range.length > 0 {
                 linkItems.append((range, rendered.highlightStyle, onTap))
             }
+            for link in rendered.links {
+                guard let onTap = link.onTap else { continue }
+                linkItems.append((NSRange(location: range.location + link.range.location, length: link.range.length),
+                                  link.highlightStyle, onTap))
+            }
         }
         renderCache = nextCache
         displayMatches = nextDisplayMatches
@@ -823,31 +833,39 @@ open class ZLRichLabel: TTTAttributedLabel {
     private func renderMatch(_ match: TagRichMatch, baseStyle: HTagTextStyle) -> RenderedMatch {
         // 本次创建的 View 的 id 都 >= firstId（id 只增不减，复用的 View 不会冲突）
         let firstId = nextAttachmentId
-        // handler 中通过 context.attachmentString(for:) 创建的 View，onTap 确定后再统一加点击
-        var pending: [(Attachment, Bool)] = []
         let context = TagRichRuleContext(match: match, baseStyle: baseStyle) { [unowned self] widget, style in
             let attachment = self.makeAttachment(widget: widget, style: style)
-            pending.append((attachment, widget.tappable))
             return self.makeAttachmentString(attachment, style: style)
         }
         match.rule.handler(context)
         context.attachmentFactory = nil
 
         let onTap = context.onTap
-        if let onTap = onTap {
-            for (attachment, tappable) in pending where tappable {
-                addTap(to: attachment.view, action: onTap)
+        // TTTAttributedLabel 不绘制 NSTextAttachment，这里转换成 View 承载
+        let content = convertTextAttachments(in: context.attributedString, style: baseStyle, tapAction: nil)
+        let created = attachments.values.filter { $0.id >= firstId }.sorted { $0.id < $1.id }
+
+        // 自定义 View / 图片的点击：位于哪一段 addLink 的范围内就触发哪一段（后添加的优先），否则触发整体 onTap
+        if created.contains(where: { $0.tappable }) {
+            var locations: [Int: Int] = [:]
+            content.enumerateAttribute(ZLRichLabel.attachmentKey, in: NSRange(location: 0, length: content.length),
+                                       options: []) { value, range, _ in
+                if let id = value as? Int { locations[id] = range.location }
+            }
+            for attachment in created where attachment.tappable {
+                let link = locations[attachment.id].flatMap { location in
+                    context.links.last { $0.onTap != nil && NSLocationInRange(location, $0.range) }
+                }
+                if let action = link?.onTap ?? onTap { addTap(to: attachment.view, action: action) }
             }
         }
-        // TTTAttributedLabel 不绘制 NSTextAttachment，这里转换成 View 承载
-        let content = convertTextAttachments(in: context.attributedString, style: baseStyle, tapAction: onTap)
-        let created = attachments.values.filter { $0.id >= firstId }.sorted { $0.id < $1.id }
         return RenderedMatch(match: match,
                              content: NSAttributedString(attributedString: content),
                              onTap: onTap,
                              onLongPress: context.onLongPress,
                              highlightStyle: context.highlightStyle,
-                             attachments: created)
+                             attachments: created,
+                             links: context.links.filter { NSMaxRange($0.range) <= content.length })
     }
 
     /// 计算 View 的尺寸：systemLayoutSizeFitting → sizeThatFits → bounds
@@ -869,6 +887,7 @@ open class ZLRichLabel: TTTAttributedLabel {
 
         let attachment = Attachment(id: nextAttachmentId, view: view, alignment: widget.alignment,
                                     font: font, autoSize: autoSize, size: size)
+        attachment.tappable = widget.tappable
         nextAttachmentId += 1
         attachments[attachment.id] = attachment
         return attachment
@@ -1312,7 +1331,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         let location = gesture.location(in: self)
         switch gesture.state {
         case .began:
-            if let item = displayMatch(at: location), let handler = item.rendered.onLongPress {
+            if let handler = longPressHandler(at: location) {
                 handler()
                 return
             }
@@ -1341,7 +1360,20 @@ open class ZLRichLabel: TTTAttributedLabel {
     /// 长按是否需要开始：有 `onLongPress` 或该位置的命中设置了 `ctx.onLongPress`
     fileprivate func shouldBeginLongPress(at location: CGPoint) -> Bool {
         if onLongPress != nil || isSelectable { return true }
-        return displayMatch(at: location)?.rendered.onLongPress != nil
+        return longPressHandler(at: location) != nil
+    }
+
+    /// 某个位置的命中长按：先找覆盖该位置的分段（后添加的优先），再用命中整体的 onLongPress
+    private func longPressHandler(at point: CGPoint) -> (() -> Void)? {
+        guard let item = displayMatch(at: point) else { return nil }
+        let index = characterIndex(at: point)
+        if index != NSNotFound {
+            let offset = index - item.range.location
+            if let link = item.rendered.links.last(where: { $0.onLongPress != nil && NSLocationInRange(offset, $0.range) }) {
+                return link.onLongPress
+            }
+        }
+        return item.rendered.onLongPress
     }
 
     // MARK: UIResponder（选中复制菜单）
@@ -1411,7 +1443,7 @@ open class ZLRichLabel: TTTAttributedLabel {
             for delta in deltas {
                 let candidate = CGPoint(x: point.x + delta.x, y: point.y + delta.y)
                 if let item = displayMatch(atCharacter: characterIndex(at: candidate)),
-                   item.rendered.onTap != nil || item.rendered.onLongPress != nil {
+                   item.rendered.onTap != nil || item.rendered.onLongPress != nil || !item.rendered.links.isEmpty {
                     return item
                 }
             }
