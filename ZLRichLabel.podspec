@@ -8,7 +8,7 @@
 
 Pod::Spec.new do |s|
   s.name             = 'ZLRichLabel'
-  s.version          = '1.1.1'
+  s.version          = '2.0.0'
   s.summary          = 'Regex-rule based rich text label with <h> tag highlighting, tappable spans, inline images and custom views.'
 
 # This description is used to generate tags and improve search results.
@@ -18,7 +18,7 @@ Pod::Spec.new do |s|
 #   * Finally, don't worry about the indent, CocoaPods strips it!
 
   s.description      = <<-DESC
-ZLRichLabel is a rich text label built on TTTAttributedLabel.
+ZLRichLabel is a CoreText based rich text label (no third-party dependency).
 ZLRichLabel (base class) parses text with prioritized regex rules and lets you render each match
 (attributes, replaced text, images, inline custom views, tap handling, pressed highlight).
 ZLTagRichLabel adds built-in <h>/<h1>/<h2>... tag highlighting with per-tag styles and tap handlers.
@@ -44,6 +44,5 @@ Supports multi-line truncation, Auto Layout self-sizing, RTL text and Objective-
   # s.public_header_files = 'Pod/Classes/**/*.h'
   # s.frameworks = 'UIKit', 'MapKit'
   # s.dependency 'AFNetworking', '~> 2.3'
-  s.dependency 'TTTAttributedLabel'
 
 end

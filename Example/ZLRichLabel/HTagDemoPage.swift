@@ -109,6 +109,8 @@ final class HTagDemoPage: UIViewController {
         case27()
         // 胶囊背景 / 渐变文字
         case28()
+        // 内边距
+        case29()
         stackView.addArrangedSubview(historyCard)
 
         refreshTapViews()
@@ -918,6 +920,81 @@ final class HTagDemoPage: UIViewController {
                 ])
             }
         }
+    }
+
+    // MARK: - 内边距
+
+    private weak var case29Label: ZLTagRichLabel?
+    private static let insets29: [(String, UIEdgeInsets)] = [
+        ("0", .zero),
+        ("8", UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)),
+        ("12 / 16", UIEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)),
+        ("24", UIEdgeInsets(top: 24, left: 24, bottom: 24, right: 24)),
+    ]
+
+    /// 29. 内边距 textInsets：文字、点击热区、内嵌 View、截断与「展开」都在内边距以内，自动高度包含内边距
+    private func case29() {
+        let name = "29. 内边距 textInsets"
+        let source = "设置 <h1>textInsets</h1> 后，背景色铺满整个 label，文字在内边距以内排版 <h2>View</h2>。"
+            + "点击热区、内嵌 View、截断与「展开」都跟着偏移，sizeThatFits / Auto Layout 自动高度会加上内边距。"
+            + "切换上面的内边距可以看到文字重新折行。@alice"
+
+        let label = ZLTagRichLabel(frame: .zero)
+        label.numberOfLines = 3
+        label.verticalAlignment = .top
+        label.backgroundColor = UIColor(hex: 0xEADDFF)
+        label.layer.cornerRadius = 12
+        label.layer.masksToBounds = true
+        label.update { v in
+            v.textInsets = Self.insets29[2].1
+            v.style = HTagDemoPage.baseStyle
+            v.tagStyle = [.foregroundColor: UIColor.mBlue]
+            v.tagHighlightStyle = [.backgroundColor: UIColor(white: 0, alpha: 0.08)]
+            v.onTagTap = { [weak self] info in self?.onTap(name, info) }
+            v.tagWidgetBuilder = { info, _ in
+                guard info.name == "h2" else { return nil }
+                let badge = PaddingLabel(insets: UIEdgeInsets(top: 1, left: 6, bottom: 1, right: 6))
+                badge.text = info.text
+                badge.font = .boldSystemFont(ofSize: 11)
+                badge.textColor = .white
+                badge.backgroundColor = .mDeepPurple
+                badge.layer.cornerRadius = 4
+                badge.layer.masksToBounds = true
+                return ZLRichWidget(view: badge)
+            }
+            try? v.addRule(name: "mention", pattern: "@\\w+") { ctx in
+                ctx.addAttributes([.foregroundColor: UIColor.mPurple])
+                ctx.onTap = { [weak self] match in self?.onRuleTap(name, match, action: "点击 @") }
+            }
+            let tokenStyle: ZLTextStyle = [.foregroundColor: UIColor.mDeepOrange,
+                                             .font: UIFont.systemFont(ofSize: 15, weight: .semibold)]
+            v.expandToken = NSAttributedString(string: "… 全文", attributes: tokenStyle)
+            v.collapseToken = NSAttributedString(string: " 收起", attributes: tokenStyle)
+            v.onExpandChanged = { [weak self] _ in
+                UIView.animate(withDuration: 0.25) { self?.view.layoutIfNeeded() }
+            }
+            v.text = source
+        }
+        case29Label = label
+
+        let insets = UISegmentedControl(items: Self.insets29.map { $0.0 })
+        insets.selectedSegmentIndex = 2
+        insets.addTarget(self, action: #selector(insetsChanged29(_:)), for: .valueChanged)
+        let hint = CardView.label("textInsets（pt）", font: .systemFont(ofSize: 11), color: UIColor(white: 0, alpha: 0.45))
+
+        let content = UIStackView(arrangedSubviews: [hint, insets, label])
+        content.axis = .vertical
+        content.spacing = 8
+
+        let card = DemoCard(title: name, source: source, content: content)
+        cards[name] = card
+        stackView.addArrangedSubview(card)
+    }
+
+    @objc private func insetsChanged29(_ sender: UISegmentedControl) {
+        guard let label = case29Label else { return }
+        label.textInsets = Self.insets29[sender.selectedSegmentIndex].1
+        UIView.animate(withDuration: 0.25) { self.view.layoutIfNeeded() }
     }
 
     // MARK: - 选中复制

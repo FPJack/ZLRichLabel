@@ -4,9 +4,7 @@ PODS:
   - FBSnapshotTestCase/Core (2.1.4)
   - FBSnapshotTestCase/SwiftSupport (2.1.4):
     - FBSnapshotTestCase/Core
-  - TTTAttributedLabel (2.0.0)
-  - ZLRichLabel (1.0.0):
-    - TTTAttributedLabel
+  - ZLRichLabel (1.2.0)
 
 DEPENDENCIES:
   - FBSnapshotTestCase (~> 2.1.4)
@@ -15,7 +13,6 @@ DEPENDENCIES:
 SPEC REPOS:
   trunk:
     - FBSnapshotTestCase
-    - TTTAttributedLabel
 
 EXTERNAL SOURCES:
   ZLRichLabel:
@@ -23,8 +20,7 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   FBSnapshotTestCase: 094f9f314decbabe373b87cc339bea235a63e07a
-  TTTAttributedLabel: 8cffe8e127e4e82ff3af1e5386d4cd0ad000b656
-  ZLRichLabel: 7fe7e285c0d430bcc66fcf6cdb4bb21effd02d20
+  ZLRichLabel: 85c4029662a5d156e845da2f21d2ac01cea1fd54
 
 PODFILE CHECKSUM: 7c5fe7c59d0a39e42ad959735fea0bc479a3961c
 

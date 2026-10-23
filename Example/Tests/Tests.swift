@@ -1,6 +1,5 @@
 import XCTest
 import ZLRichLabel
-import TTTAttributedLabel
 
 /// 自定义 View 尺寸变化后刷新排版
 class AttachmentResizeTests: XCTestCase {
@@ -286,7 +285,7 @@ class PerformanceCacheTests: XCTestCase {
         XCTAssertEqual(counter.mention, 3, "只有新增的 @carol 执行 handler")
         XCTAssertEqual(counter.box, 1)
         XCTAssertTrue(attachmentViews(label).first === view)
-        XCTAssertEqual(label.text as? String, "Hi @alice and \u{FFFC}, cc @bob and @carol")
+        XCTAssertEqual(label.text, "Hi @alice and \u{FFFC}, cc @bob and @carol")
         XCTAssertEqual(label.links.count, 3, "复用的命中点击仍然有效")
 
         // 在开头插入：后面的命中位置变化，重新渲染
@@ -433,7 +432,7 @@ class ExpandCollapseTests: XCTestCase {
         XCTAssertGreaterThan(rect.midY, label.bounds.height / 2, "按钮在最后一行")
         XCTAssertGreaterThan(rect.midX, label.bounds.width / 2, "按钮在行尾")
         XCTAssertLessThanOrEqual(rect.maxX, label.bounds.width + 8)
-        XCTAssertTrue(label.attributedTruncationToken.string == "… 全文")
+        XCTAssertTrue(label.attributedTruncationToken?.string == "… 全文")
     }
 
     func testShortTextIsNotTruncated() {
@@ -461,16 +460,13 @@ class ExpandCollapseTests: XCTestCase {
         XCTAssertGreaterThan(label.bounds.height, collapsedHeight)
         XCTAssertFalse(label.isTruncated)
         XCTAssertEqual(label.expandTokenRect, .zero)
-        XCTAssertTrue(label.attributedText.string.hasSuffix(" 收起"), "展开后末尾显示「收起」")
+        XCTAssertTrue(label.attributedText!.string.hasSuffix(" 收起"), "展开后末尾显示「收起」")
         XCTAssertEqual(label.links.count, 2, "@alice + 收起")
         XCTAssertEqual(calls.value, 1, "展开 / 收起只重新拼装，不重新执行 handler")
 
         // 点击「收起」链接
-        // TTT 的 links 只保存 NSTextCheckingResult，链接对象在 linkModels 中
-        let models = (label.value(forKey: "linkModels") as? [Any]) ?? []
-        let collapseLink = models.compactMap { $0 as? TTTAttributedLabelLink }
-            .max { $0.result.range.location < $1.result.range.location }
-        collapseLink?.linkTapBlock?(label, collapseLink!)
+        let collapseLink = label.links.max { $0.range.location < $1.range.location }
+        label.performTap(on: collapseLink!)
         fit(label)
         XCTAssertFalse(label.isExpanded)
         XCTAssertEqual(changes, [true, false])
@@ -494,7 +490,7 @@ class ExpandCollapseTests: XCTestCase {
         label.collapseToken = nil
         label.isExpanded = true
         fit(label)
-        XCTAssertFalse(label.attributedText.string.hasSuffix("收起"))
+        XCTAssertFalse(label.attributedText!.string.hasSuffix("收起"))
         XCTAssertEqual(label.links.count, 1)
     }
 }
@@ -549,7 +545,7 @@ class GestureTests: XCTestCase {
 
     func testCharacterIndexAndMatchAtPoint() {
         let label = makeLabel()
-        let display = label.attributedText.string as NSString
+        let display = label.attributedText!.string as NSString
         var sawPlain = false
         for y in stride(from: CGFloat(1), to: label.bounds.height, by: 3) {
             for x in stride(from: CGFloat(1), to: label.bounds.width, by: 3) {
@@ -578,7 +574,7 @@ class GestureTests: XCTestCase {
         let info = label.gestureInfo(at: CGPoint(x: 2, y: 8))
         XCTAssertNil(info.match)
         XCTAssertEqual(info.rawText, label.rawText)
-        XCTAssertEqual(info.displayText, label.attributedText.string)
+        XCTAssertEqual(info.displayText, label.attributedText!.string)
     }
 
     func testExtendsLinkTouchArea() {
@@ -671,12 +667,12 @@ class SelectionTests: XCTestCase {
     }
 
     private func range(of text: String, in label: ZLRichLabel) -> NSRange {
-        return (label.attributedText.string as NSString).range(of: text)
+        return (label.attributedText!.string as NSString).range(of: text)
     }
 
     func testRawTextMapping() {
         let label = makeLabel()
-        XCTAssertEqual(label.attributedText.string, "Hi \u{FFFC} 👤alice, hello world")
+        XCTAssertEqual(label.attributedText!.string, "Hi \u{FFFC} 👤alice, hello world")
 
         label.selectAllText()
         XCTAssertTrue(label.hasSelection)
@@ -760,7 +756,7 @@ class SelectionTests: XCTestCase {
 
         label.collapseToken = NSAttributedString(string: " 收起")
         label.isExpanded = true
-        XCTAssertTrue(label.attributedText.string.hasSuffix(" 收起"))
+        XCTAssertTrue(label.attributedText!.string.hasSuffix(" 收起"))
         label.selectAllText()
         XCTAssertEqual(label.selectedText, "Hi 👤bob", "全选不包含「收起」")
         XCTAssertEqual(label.selectedRawText, "Hi @bob")
@@ -844,30 +840,29 @@ class TagParserTests: XCTestCase {
         return label
     }
 
-    /// 与 TTT 一致：倒序查找，后添加的链接优先
+    /// 倒序查找，后添加的链接优先
     private func tap(_ label: ZLTagRichLabel, at index: Int) {
-        let models = ((label.value(forKey: "linkModels") as? [Any]) ?? []).compactMap { $0 as? TTTAttributedLabelLink }
-        guard let link = models.last(where: { NSLocationInRange(index, $0.result.range) }) else {
+        guard let link = label.link(atCharacter: index) else {
             return XCTFail("no link at \(index)")
         }
-        link.linkTapBlock?(label, link)
+        label.performTap(on: link)
     }
 
     func testLabelRendersNestedTagsWithInheritedStyle() {
         var tapped: [String] = []
         let label = makeLabel("Hi <b>粗 <color value=\"red\">红</color></b>!", taps: { tapped.append($0.name) })
-        let display = label.attributedText.string as NSString
+        let display = label.attributedText!.string as NSString
         XCTAssertEqual(display as String, "Hi 粗 红!")
         XCTAssertEqual(label.tags.map { $0.name }, ["b", "color"])
 
         let red = display.range(of: "红").location
-        let attrs = label.attributedText.attributes(at: red, effectiveRange: nil)
+        let attrs = label.attributedText!.attributes(at: red, effectiveRange: nil)
         XCTAssertEqual(attrs[.foregroundColor] as? UIColor, .systemRed, "内层颜色")
         let font = attrs[.font] as? UIFont
         XCTAssertTrue(font?.fontDescriptor.symbolicTraits.contains(.traitBold) ?? false, "继承外层粗体")
 
         let boldOnly = display.range(of: "粗").location
-        XCTAssertEqual(label.attributedText.attribute(.foregroundColor, at: boldOnly, effectiveRange: nil) as? UIColor,
+        XCTAssertEqual(label.attributedText!.attribute(.foregroundColor, at: boldOnly, effectiveRange: nil) as? UIColor,
                        .darkGray)
 
         // 点内层触发内层，点外层触发外层
@@ -879,7 +874,7 @@ class TagParserTests: XCTestCase {
     func testDefaultLabelStillOnlyParsesHTags() {
         let label = ZLTagRichLabel(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
         label.text = "<b>x</b> <h1>y</h1>"
-        XCTAssertEqual(label.attributedText.string, "<b>x</b> y")
+        XCTAssertEqual(label.attributedText!.string, "<b>x</b> y")
         XCTAssertEqual(label.tags.map { $0.name }, ["h1"])
     }
 }
@@ -908,13 +903,14 @@ class DecorationTests: XCTestCase {
     }
 
     private func kern(_ label: ZLRichLabel, at index: Int) -> Double {
-        return (label.attributedText.attribute(.kern, at: index, effectiveRange: nil) as? NSNumber)?.doubleValue ?? 0
+        return (label.attributedText!.attribute(.kern, at: index, effectiveRange: nil) as? NSNumber)?.doubleValue ?? 0
     }
 
     /// 渲染为 1x 位图，统计满足条件的像素数
     private func countPixels(_ label: ZLRichLabel, where match: (UInt8, UInt8, UInt8, UInt8) -> Bool) -> Int {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
+        format.preferredRange = .standard   // 8 位 RGBA，按 4 字节读取像素
         format.opaque = true
         let image = UIGraphicsImageRenderer(bounds: label.bounds, format: format).image { context in
             UIColor.white.setFill()
@@ -939,7 +935,7 @@ class DecorationTests: XCTestCase {
                                           margin: 2)
         let plain = makeLabel("Hi #swift##ios# end")
         let label = makeLabel("Hi #swift##ios# end", background: background)
-        let display = label.attributedText.string as NSString
+        let display = label.attributedText!.string as NSString
         XCTAssertEqual(display as String, "Hi #swift##ios# end", "只改属性，不插入字符")
 
         let first = display.range(of: "#swift#")
@@ -950,7 +946,7 @@ class DecorationTests: XCTestCase {
 
         // 相邻的两个命中是两个胶囊
         var occurrences: [NSRange] = []
-        label.attributedText.enumerateAttribute(occurrenceKey, in: NSRange(location: 0, length: display.length)) { value, range, _ in
+        label.attributedText!.enumerateAttribute(occurrenceKey, in: NSRange(location: 0, length: display.length)) { value, range, _ in
             if value != nil { occurrences.append(range) }
         }
         XCTAssertEqual(occurrences, [first, second])
@@ -979,9 +975,9 @@ class DecorationTests: XCTestCase {
 
     func testBackgroundAtParagraphStartUsesHeadIndent() {
         let label = makeLabel("#swift# first\n#ios# second", background: ZLTextBackground(fillColor: .red))
-        let display = label.attributedText.string as NSString
+        let display = label.attributedText!.string as NSString
         for location in [0, display.range(of: "#ios#").location] {
-            let style = label.attributedText.attribute(.paragraphStyle, at: location, effectiveRange: nil) as? NSParagraphStyle
+            let style = label.attributedText!.attribute(.paragraphStyle, at: location, effectiveRange: nil) as? NSParagraphStyle
             XCTAssertEqual(style?.firstLineHeadIndent, 8, "段落开头：用首行缩进预留 padding.left + margin")
         }
     }
@@ -1002,7 +998,7 @@ class DecorationTests: XCTestCase {
         XCTAssertGreaterThan(countPixels(plain, where: isDark), 20)
 
         let label = makeLabel("#gradient#", gradient: ZLTextGradient(colors: [green, green]))
-        XCTAssertEqual(label.attributedText.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor, .clear)
+        XCTAssertEqual(label.attributedText!.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor, .clear)
         XCTAssertGreaterThan(countPixels(label, where: isGreen), 20, "字形区域填充了渐变")
         XCTAssertEqual(countPixels(label, where: isDark), 0, "原来的黑色文字不再绘制")
     }
@@ -1079,7 +1075,7 @@ class RichTextSwiftUITests: XCTestCase {
     private func checkAutoHeight(file: StaticString = #filePath, line: UInt = #line) {
         let model = Model(shortText)
         guard let label = host(Host(model: model)) else { return XCTFail("no label", file: file, line: line) }
-        XCTAssertEqual(label.attributedText.string, "Agree to User Agreement", file: file, line: line)
+        XCTAssertEqual(label.attributedText!.string, "Agree to User Agreement", file: file, line: line)
         let oneLine = label.bounds.height
         XCTAssertGreaterThan(oneLine, 10, file: file, line: line)
         XCTAssertEqual(oneLine, expectedHeight(label), accuracy: 1, file: file, line: line)
@@ -1143,9 +1139,8 @@ class RichTextSwiftUITests: XCTestCase {
 class TapCallbackTests: XCTestCase {
 
     private func tapAll(_ label: ZLRichLabel) {
-        let models = ((label.value(forKey: "linkModels") as? [Any]) ?? []).compactMap { $0 as? TTTAttributedLabelLink }
-        for link in models.sorted(by: { $0.result.range.location < $1.result.range.location }) {
-            link.linkTapBlock?(label, link)
+        for link in label.links.sorted(by: { $0.range.location < $1.range.location }) {
+            label.performTap(on: link)
         }
     }
 
@@ -1221,7 +1216,7 @@ class ObjCUpdateTagTests: XCTestCase {
         }
         XCTAssertTrue(received === label, "回调参数就是这个 ZLTagRichLabel")
         XCTAssertEqual(label.statistics.renders, 1, "多处修改只渲染一次")
-        XCTAssertEqual(label.attributedText.string, "Agree Terms")
+        XCTAssertEqual(label.attributedText!.string, "Agree Terms")
         XCTAssertEqual(label.tags.map { $0.name }, ["h1"])
     }
 }
@@ -1251,7 +1246,7 @@ class TouchAreaAndThresholdTests: XCTestCase {
 
     func testPlainTextNeverResolvesToNearbyLink() {
         let label = makeTouchLabel()
-        let display = label.attributedText.string as NSString
+        let display = label.attributedText!.string as NSString
         var plainChecked = 0
         var gapExtended = 0
         for y in stride(from: CGFloat(0.5), to: label.bounds.height, by: 1) {
@@ -1260,7 +1255,7 @@ class TouchAreaAndThresholdTests: XCTestCase {
                 let index = label.characterIndex(at: p)
                 if index != NSNotFound {
                     // 按在文字上：只有这个字本身属于链接 / 命中时才返回
-                    let ownMatch = ((label.links as? [NSTextCheckingResult]) ?? []).contains { NSLocationInRange(index, $0.range) }
+                    let ownMatch = label.links.contains { NSLocationInRange(index, $0.range) }
                     if !ownMatch {
                         plainChecked += 1
                         XCTAssertNil(label.link(at: p), "普通文字「\(display.substring(with: NSRange(location: index, length: 1)))」不应命中附近的链接 \(p)")
@@ -1295,7 +1290,7 @@ class TouchAreaAndThresholdTests: XCTestCase {
     }
 
     private func totalLines(_ label: ZLRichLabel, width: CGFloat) -> Int {
-        let framesetter = CTFramesetterCreateWithAttributedString(label.attributedText as CFAttributedString)
+        let framesetter = CTFramesetterCreateWithAttributedString(label.attributedText! as CFAttributedString)
         let path = CGPath(rect: CGRect(x: 0, y: 0, width: width, height: 10000), transform: nil)
         let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0), path, nil)
         return (CTFrameGetLines(frame) as? [CTLine])?.count ?? 0
@@ -1393,3 +1388,283 @@ class AttachmentHitTestTests: XCTestCase {
         XCTAssertTrue(label.hitTest(center(of: icon, in: label), with: nil) === label)
     }
 }
+
+/// 基类 ZLAttributedLabel：纯文本 / 富文本、链接识别、按下样式、绘制、无障碍
+class AttributedLabelTests: XCTestCase {
+
+    private func makeLabel(width: CGFloat = 300) -> ZLAttributedLabel {
+        let label = ZLAttributedLabel(frame: CGRect(x: 0, y: 0, width: width, height: 0))
+        label.numberOfLines = 0
+        label.font = .systemFont(ofSize: 15)
+        return label
+    }
+
+    private func fit(_ label: ZLAttributedLabel) {
+        label.frame.size.height = label.sizeThatFits(CGSize(width: label.bounds.width, height: CGFloat.greatestFiniteMagnitude)).height
+        label.layoutIfNeeded()
+    }
+
+    private func render(_ label: ZLAttributedLabel) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.preferredRange = .standard   // 8 位 RGBA，按 4 字节读取像素
+        return UIGraphicsImageRenderer(bounds: label.bounds, format: format).image { ctx in
+            label.layer.render(in: ctx.cgContext)
+        }
+    }
+
+    private func colorCount(_ image: UIImage, matching: (UInt8, UInt8, UInt8) -> Bool) -> Int {
+        guard let cg = image.cgImage, let data = cg.dataProvider?.data, let ptr = CFDataGetBytePtr(data) else { return 0 }
+        var count = 0
+        for y in 0..<cg.height {
+            for x in 0..<cg.width {
+                let i = y * cg.bytesPerRow + x * 4
+                // BGRA / RGBA 都按通道判断（只用于纯红 / 纯绿检测）
+                let (c0, c1, c2) = (ptr[i], ptr[i + 1], ptr[i + 2])
+                if cg.bitmapInfo.contains(.byteOrder32Little) ? matching(c2, c1, c0) : matching(c0, c1, c2) { count += 1 }
+            }
+        }
+        return count
+    }
+
+    func testPlainTextUsesLabelAttributesAndFollowsChanges() {
+        let label = makeLabel()
+        label.textColor = .red
+        label.text = "Hello"
+        XCTAssertEqual(label.attributedText?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor, .red)
+        label.font = .boldSystemFont(ofSize: 20)
+        XCTAssertEqual((label.attributedText?.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)?.pointSize, 20,
+                       "纯文本在字体变化后重新生成")
+        label.text = nil
+        XCTAssertNil(label.attributedText)
+        XCTAssertEqual(label.sizeThatFits(CGSize(width: 100, height: 100)), .zero)
+    }
+
+    func testAttributedTextFillsMissingFontAndDetectsLinks() {
+        let label = makeLabel()
+        label.enabledTextCheckingTypes = NSTextCheckingResult.CheckingType.link.rawValue
+        let text = NSMutableAttributedString(string: "Visit https://example.com or tap here")
+        text.addAttribute(.link, value: "https://apple.com", range: (text.string as NSString).range(of: "here"))
+        label.attributedText = text
+        XCTAssertNotNil(label.attributedText?.attribute(.font, at: 0, effectiveRange: nil), "未设置字体时补上 label.font")
+        XCTAssertEqual(label.links.count, 2)
+        XCTAssertEqual(Set(label.links.compactMap { $0.url?.host }), ["example.com", "apple.com"])
+        let index = (label.attributedText!.string as NSString).range(of: "example").location
+        XCTAssertEqual(label.attributedText?.attribute(.foregroundColor, at: index, effectiveRange: nil) as? UIColor,
+                       label.linkAttributes[.foregroundColor] as? UIColor, "识别的链接使用 linkAttributes")
+
+        label.attributedText = NSAttributedString(string: "no links")
+        XCTAssertTrue(label.links.isEmpty, "重新设置文字清空链接")
+    }
+
+    func testTapHighlightsAndCallsBack() {
+        final class Delegate: NSObject, ZLAttributedLabelDelegate {
+            var urls: [URL] = []
+            func attributedLabel(_ label: ZLAttributedLabel, didSelectLinkWith url: URL) { urls.append(url) }
+        }
+        let label = makeLabel()
+        let delegate = Delegate()
+        label.delegate = delegate
+        label.text = "open link now"
+        let range = NSRange(location: 5, length: 4)
+        label.addLink(to: URL(string: "https://a.com")!, range: range)
+        var tapped = 0
+        label.addLink(range: NSRange(location: 10, length: 3)) { _, _ in tapped += 1 }
+        fit(label)
+
+        let before = label.attributedText
+        let link = label.links[0]
+        label.activeLink = link
+        XCTAssertFalse(label.attributedText === before, "按下时显示按下样式")
+        label.activeLink = nil
+        XCTAssertTrue(label.attributedText === before, "松开后恢复")
+
+        label.performTap(on: link)
+        label.performTap(on: label.links[1])
+        XCTAssertEqual(delegate.urls, [URL(string: "https://a.com")!])
+        XCTAssertEqual(tapped, 1)
+
+        let rect = label.boundingRect(forCharacterRange: range)
+        XCTAssertFalse(rect.isEmpty)
+        XCTAssertTrue(label.link(at: CGPoint(x: rect.midX, y: rect.midY)) === link)
+        XCTAssertTrue(label.hitTest(CGPoint(x: rect.midX, y: rect.midY), with: nil) === label)
+    }
+
+    func testTruncationAndVerticalAlignment() {
+        let label = makeLabel(width: 120)
+        label.numberOfLines = 2
+        label.lineBreakMode = .byTruncatingTail
+        label.text = String(repeating: "word ", count: 40)
+        fit(label)
+        let twoLines = label.bounds.height
+        label.numberOfLines = 0
+        XCTAssertGreaterThan(label.sizeThatFits(CGSize(width: 120, height: CGFloat.greatestFiniteMagnitude)).height, twoLines)
+
+        let short = makeLabel()
+        short.text = "Hi"
+        short.frame.size.height = 100
+        short.verticalAlignment = .top
+        let top = short.textRect(forBounds: short.bounds, limitedToNumberOfLines: 0).minY
+        short.verticalAlignment = .bottom
+        let bottom = short.textRect(forBounds: short.bounds, limitedToNumberOfLines: 0).minY
+        XCTAssertEqual(top, 0)
+        XCTAssertGreaterThan(bottom, 50)
+        short.textInsets = UIEdgeInsets(top: 5, left: 7, bottom: 5, right: 7)
+        let size = short.sizeThatFits(CGSize(width: 300, height: 100))
+        short.textInsets = .zero
+        XCTAssertEqual(size.width - short.sizeThatFits(CGSize(width: 300, height: 100)).width, 14)
+    }
+
+    func testDrawsBackgroundColorAndStrikethrough() {
+        let label = makeLabel()
+        label.backgroundColor = .white
+        let text = NSMutableAttributedString(string: "background strike",
+                                             attributes: [.font: UIFont.systemFont(ofSize: 20), .foregroundColor: UIColor.black])
+        text.addAttribute(.backgroundColor, value: UIColor.green, range: NSRange(location: 0, length: 10))
+        text.addAttributes([.strikethroughStyle: NSUnderlineStyle.single.rawValue, .strikethroughColor: UIColor.red],
+                           range: NSRange(location: 11, length: 6))
+        label.attributedText = text
+        fit(label)
+        let image = render(label)
+        XCTAssertGreaterThan(colorCount(image) { r, g, b in g > 200 && r < 60 && b < 60 }, 100, "绘制了背景色")
+        XCTAssertGreaterThan(colorCount(image) { r, g, b in r > 200 && g < 60 && b < 60 }, 20, "绘制了删除线")
+    }
+
+    func testAccessibilityExposesLinks() {
+        let label = makeLabel()
+        label.text = "plain"
+        fit(label)
+        XCTAssertTrue(label.isAccessibilityElement, "没有链接时与 UILabel 相同")
+        XCTAssertNil(label.accessibilityElements)
+
+        label.text = "read terms please"
+        var tapped = false
+        label.addLink(range: NSRange(location: 5, length: 5)) { _, _ in tapped = true }
+        fit(label)
+        XCTAssertFalse(label.isAccessibilityElement)
+        let elements = label.accessibilityElements as? [UIAccessibilityElement] ?? []
+        XCTAssertEqual(elements.count, 2)
+        XCTAssertEqual(elements.last?.accessibilityLabel, "terms")
+        XCTAssertTrue(elements.last?.accessibilityTraits.contains(.link) ?? false)
+        XCTAssertTrue(elements.last?.accessibilityActivate() ?? false)
+        XCTAssertTrue(tapped)
+    }
+}
+
+/// 内边距 textInsets：尺寸、绘制、点击定位、内嵌 View、展开按钮都要按内边距偏移
+class TextInsetsTests: XCTestCase {
+
+    private let insets = UIEdgeInsets(top: 12, left: 20, bottom: 8, right: 16)
+    private var window: UIWindow!
+
+    override func setUp() {
+        super.setUp()
+        window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        window.isHidden = false
+    }
+
+    override func tearDown() {
+        window.isHidden = true
+        window = nil
+        super.tearDown()
+    }
+
+    private func makeLabel(insets: UIEdgeInsets, numberOfLines: Int = 0, box: UIView? = nil) -> ZLRichLabel {
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: 240, height: 0))
+        label.numberOfLines = numberOfLines
+        label.verticalAlignment = .top
+        label.update { v in
+            v.textInsets = insets
+            v.style = [.font: UIFont.systemFont(ofSize: 15)]
+            v.expandToken = NSAttributedString(string: "… 全文")
+            if let box = box {
+                try? v.addRule(name: "box", pattern: "\\[box\\]") { ctx in
+                    ctx.attributedString.setAttributedString(ctx.attachmentString(for: ZLRichWidget(view: box, size: CGSize(width: 20, height: 12))))
+                }
+            }
+            try? v.addRule(name: "mention", pattern: "@\\w+") { ctx in ctx.onTap = { _ in } }
+            v.text = "[box] @alice " + String(repeating: "some words here ", count: 12)
+        }
+        window.addSubview(label)
+        label.frame.size.height = label.sizeThatFits(CGSize(width: 240, height: CGFloat.greatestFiniteMagnitude)).height
+        label.layoutIfNeeded()
+        return label
+    }
+
+    func testSizeIncludesInsets() {
+        let plain = makeLabel(insets: .zero)
+        let padded = makeLabel(insets: insets)
+        let plainSize = plain.sizeThatFits(CGSize(width: 240 - 36, height: CGFloat.greatestFiniteMagnitude))
+        let paddedSize = padded.sizeThatFits(CGSize(width: 240, height: CGFloat.greatestFiniteMagnitude))
+        XCTAssertEqual(paddedSize.height, plainSize.height + 20, "同样的文字宽度，高度只多出上下内边距")
+        padded.preferredMaxLayoutWidth = 240
+        XCTAssertEqual(padded.intrinsicContentSize.height, paddedSize.height)
+    }
+
+    func testContentIsOffsetByInsets() {
+        let plainBox = UIView(), paddedBox = UIView()
+        let plain = makeLabel(insets: .zero, box: plainBox)
+        let padded = makeLabel(insets: UIEdgeInsets(top: 12, left: 20, bottom: 8, right: 20), box: paddedBox)
+        // 同样的文字宽度（240 - 40 vs 200 无内边距时排版不同），这里只比较首字符：都在第一行行首
+        XCTAssertEqual(paddedBox.frame.minX - plainBox.frame.minX, 20, accuracy: 0.5, "内嵌 View 向右偏移左内边距")
+        XCTAssertEqual(paddedBox.frame.minY - plainBox.frame.minY, 12, accuracy: 0.5, "内嵌 View 向下偏移上内边距")
+
+        // 内边距区域没有文字，也不会命中链接
+        XCTAssertEqual(padded.characterIndex(at: CGPoint(x: 5, y: 20)), NSNotFound)
+        XCTAssertEqual(padded.characterIndex(at: CGPoint(x: 30, y: 4)), NSNotFound)
+        let mention = (padded.attributedText!.string as NSString).range(of: "@alice")
+        let rect = padded.boundingRect(forCharacterRange: mention)
+        XCTAssertGreaterThanOrEqual(rect.minX, 20)
+        XCTAssertGreaterThanOrEqual(rect.minY, 12 - 1, "（行高框比字形略高，允许 1pt）")
+        XCTAssertNotNil(padded.link(at: CGPoint(x: rect.midX, y: rect.midY)))
+        XCTAssertNotNil(padded.match(at: CGPoint(x: rect.midX, y: rect.midY)))
+        let all = padded.boundingRect(forCharacterRange: NSRange(location: 0, length: padded.attributedText!.length))
+        XCTAssertLessThanOrEqual(all.maxX, 240 - 20 + 0.5, "文字不超过右内边距")
+        XCTAssertLessThanOrEqual(all.maxY, padded.bounds.height - 8 + 0.5, "文字不超过下内边距")
+    }
+
+    func testExpandTokenRespectsInsets() {
+        let label = makeLabel(insets: insets, numberOfLines: 2)
+        XCTAssertTrue(label.isTruncated)
+        let token = label.expandTokenRect.insetBy(dx: 8, dy: 6)   // 去掉点击区域的扩大量
+        XCTAssertLessThanOrEqual(token.maxX, 240 - insets.right + 0.5, "「展开」不超过右内边距")
+        XCTAssertLessThanOrEqual(token.maxY, label.bounds.height - insets.bottom + 0.5)
+    }
+
+    func testInsetsAreNotDrawnInto() {
+        let label = makeLabel(insets: insets)
+        label.backgroundColor = .white
+        label.style = [.font: UIFont.systemFont(ofSize: 15), .foregroundColor: UIColor.black]
+        label.layoutIfNeeded()
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.preferredRange = .standard   // 8 位 RGBA，按 4 字节读取像素
+        let image = UIGraphicsImageRenderer(bounds: label.bounds, format: format).image { label.layer.render(in: $0.cgContext) }
+        guard let cg = image.cgImage, let ptr = CFDataGetBytePtr(cg.dataProvider!.data) else { return XCTFail() }
+        func dark(_ x: Int, _ y: Int) -> Bool {
+            let i = y * cg.bytesPerRow + x * 4
+            return Int(ptr[i]) + Int(ptr[i + 1]) + Int(ptr[i + 2]) < 600
+        }
+        var inInsets = 0, inContent = 0
+        for y in 0..<cg.height {
+            for x in 0..<cg.width where dark(x, y) {
+                let inside = CGFloat(x) >= insets.left - 1 && CGFloat(x) < 240 - insets.right + 1
+                    && CGFloat(y) >= insets.top - 1 && CGFloat(y) < label.bounds.height - insets.bottom + 1
+                if inside { inContent += 1 } else { inInsets += 1 }
+            }
+        }
+        XCTAssertGreaterThan(inContent, 200)
+        XCTAssertEqual(inInsets, 0, "内边距区域不绘制文字")
+    }
+
+    func testChangingInsetsRelayouts() {
+        let box = UIView()
+        let label = makeLabel(insets: .zero, box: box)
+        let before = box.frame.minX
+        label.textInsets = UIEdgeInsets(top: 0, left: 30, bottom: 0, right: 0)
+        label.layoutIfNeeded()
+        XCTAssertEqual(box.frame.minX - before, 30, accuracy: 0.5, "修改内边距后内嵌 View 跟随移动")
+    }
+}
+
+

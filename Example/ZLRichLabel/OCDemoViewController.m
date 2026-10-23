@@ -7,7 +7,6 @@
 
 #import <UIKit/UIKit.h>
 @import ZLRichLabel;
-@import TTTAttributedLabel;
 
 #pragma mark - 颜色
 
@@ -721,7 +720,7 @@ static NSString *OCQuote(NSString *s) {
                   configure:(void (^)(ZLTagRichLabel *v))configure {
     ZLTagRichLabel *label = [[ZLTagRichLabel alloc] initWithFrame:CGRectZero];
     label.numberOfLines = 0;
-    label.verticalAlignment = TTTAttributedLabelVerticalAlignmentTop;
+    label.verticalAlignment = ZLLabelVerticalAlignmentTop;
 
     __weak typeof(self) weakSelf = self;
     // updateTag: 的回调参数直接是 ZLTagRichLabel，不需要强转
@@ -750,7 +749,7 @@ static NSString *OCQuote(NSString *s) {
 - (ZLRichLabel *)addRuleCase:(NSString *)name source:(NSString *)source configure:(void (^)(ZLRichLabel *v))configure {
     ZLRichLabel *label = [[ZLRichLabel alloc] initWithFrame:CGRectZero];
     label.numberOfLines = 0;
-    label.verticalAlignment = TTTAttributedLabelVerticalAlignmentTop;
+    label.verticalAlignment = ZLLabelVerticalAlignmentTop;
     [label update:^(ZLRichLabel *v) {
         v.style = OCDemoViewController.baseStyle;
         configure(v);
@@ -1240,7 +1239,7 @@ static NSString *OCQuote(NSString *s) {
 
     ZLTagRichLabel *label = [[ZLTagRichLabel alloc] initWithFrame:CGRectZero];
     label.numberOfLines = 0;
-    label.verticalAlignment = TTTAttributedLabelVerticalAlignmentTop;
+    label.verticalAlignment = ZLLabelVerticalAlignmentTop;
 
     __weak typeof(self) weakSelf = self;
     __weak ZLTagRichLabel *weakLabel = label;
@@ -1506,7 +1505,7 @@ static NSString *OCQuote(NSString *s) {
 
     ZLTagRichLabel *label = [[ZLTagRichLabel alloc] initWithFrame:CGRectZero];
     label.numberOfLines = 0;
-    label.verticalAlignment = TTTAttributedLabelVerticalAlignmentTop;
+    label.verticalAlignment = ZLLabelVerticalAlignmentTop;
     UILabel *status = [[UILabel alloc] init];
     status.numberOfLines = 0;
     status.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
@@ -1716,7 +1715,7 @@ static NSString *OCQuote(NSString *s) {
     ZLRichLabel *label = [[ZLRichLabel alloc] initWithFrame:CGRectZero];
     label.numberOfLines = 4;
     label.lineBreakMode = NSLineBreakByTruncatingTail;
-    label.verticalAlignment = TTTAttributedLabelVerticalAlignmentTop;
+    label.verticalAlignment = ZLLabelVerticalAlignmentTop;
     self.case23Label = label;
 
     __weak typeof(self) weakSelf = self;

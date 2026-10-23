@@ -2,7 +2,7 @@
 //  ZLRichLabel.swift
 //  ZLRichLabel
 //
-//  富文本基类（基于 TTTAttributedLabel）：
+//  富文本基类（基于 ZLAttributedLabel）：
 //  - 基于正则规则（`ZLRichRule`）解析文本，重叠时按优先级取舍
 //  - 命中内容交给规则 handler 渲染（样式 / 替换文字 / 图片 / 自定义 View / 点击 / 按下高亮）
 //  - 负责渲染、内嵌 View 布局、截断、Auto Layout 自适应高度、RTL
@@ -12,7 +12,6 @@
 
 import UIKit
 import CoreText
-import TTTAttributedLabel
 
 // MARK: - 解析片段
 
@@ -83,7 +82,7 @@ public final class ZLRichGestureInfo: NSObject {
 /// 渲染 / 排版统计，用于观察缓存效果（调试用，数值只增不减，可调用 `reset()` 清零）
 @objcMembers
 public final class ZLRichLabelStatistics: NSObject {
-    /// 渲染次数（拼装富文本并交给 TTTAttributedLabel）
+    /// 渲染次数（拼装富文本并交给 ZLAttributedLabel 绘制）
     public internal(set) var renders = 0
     /// 执行规则 handler 的次数（未命中渲染缓存）
     public internal(set) var handlerCalls = 0
@@ -109,7 +108,7 @@ public final class ZLRichLabelStatistics: NSObject {
 }
 
 @objcMembers
-open class ZLRichLabel: TTTAttributedLabel {
+open class ZLRichLabel: ZLAttributedLabel {
 
     /// 原始文本（与直接设置 `text = "..."` 等价），按规则解析后渲染
     open var rawText: String = "" {
@@ -119,42 +118,46 @@ open class ZLRichLabel: TTTAttributedLabel {
         }
     }
 
-    /// 可以直接设置 `text`：
-    /// - `String`：按规则解析并渲染（等同于设置 `rawText`），xib / storyboard 中设置的文字同样会被解析
-    /// - `NSAttributedString`：不解析，按 TTTAttributedLabel 原有逻辑直接展示
-    /// - `nil`：清空
+    /// 设置 `text`：按规则解析并渲染（等同于设置 `rawText`），xib / storyboard 中设置的文字同样会被解析；`nil` 清空。
     ///
     /// 读取 `text` 得到的是渲染后的展示文字；原始字符串请读 `rawText`
-    open override var text: Any! {
+    open override var text: String? {
         get { return super.text }
         set {
-            // rebuild() 内部调用 setText(result) 时直接交给 TTTAttributedLabel
+            if let string = newValue {
+                rawText = string
+            } else if rawText.isEmpty {
+                // rawText 已为空时 didSet 不会触发，需要手动刷新
+                segments = []
+                didParse()
+                rebuild()
+            } else {
+                rawText = ""
+            }
+        }
+    }
+
+    /// 设置 `attributedText`：不解析，按 ZLAttributedLabel 原有逻辑直接展示；`nil` 清空
+    open override var attributedText: NSAttributedString? {
+        get { return super.attributedText }
+        set {
+            // rebuild() 内部设置渲染结果时直接交给 ZLAttributedLabel
             if isRebuilding {
-                super.text = newValue
+                super.attributedText = newValue
                 return
             }
-            switch newValue {
-            case let string as String:
-                rawText = string
-            case let attributed as NSAttributedString:
-                // 外部直接传富文本：清空解析状态，按普通 TTTAttributedLabel 处理
-                isPassingThrough = true
-                rawText = ""
-                segments = []
-                isPassingThrough = false
-                didParse()
-                removeAttachmentViews()
-                super.text = attributed
-            default:
-                // nil：清空（rawText 已为空时 didSet 不会触发，需要手动刷新）
-                if rawText.isEmpty {
-                    segments = []
-                    didParse()
-                    rebuild()
-                } else {
-                    rawText = ""
-                }
+            guard let attributed = newValue else {
+                text = nil
+                return
             }
+            // 外部直接传富文本：清空解析状态，按普通 ZLAttributedLabel 处理
+            isPassingThrough = true
+            rawText = ""
+            segments = []
+            isPassingThrough = false
+            didParse()
+            removeAttachmentViews()
+            super.attributedText = attributed
         }
     }
 
@@ -215,17 +218,6 @@ open class ZLRichLabel: TTTAttributedLabel {
         guard collapsed > 0, collapseThreshold > collapsed, width > 0,
               let attr = attributedText, attr.length > 0 else { return collapsed }
         return lineCount(of: attr, width: width) <= collapseThreshold ? 0 : collapsed
-    }
-
-    /// 内容在某个宽度下的总行数（按排版缓存）
-    private func lineCount(of attr: NSAttributedString, width: CGFloat) -> Int {
-        let cache = layoutCache(for: attr)
-        if let count = cache.lineCounts[width] { return count }
-        let path = CGPath(rect: CGRect(x: 0, y: 0, width: width, height: 100000), transform: nil)
-        let frame = CTFramesetterCreateFrame(cache.framesetter, CFRange(location: 0, length: 0), path, nil)
-        let count = (CTFrameGetLines(frame) as? [CTLine])?.count ?? 0
-        cache.lineCounts[width] = count
-        return count
     }
 
     /// 当前内容是否被截断（最近一次布局的结果）
@@ -483,38 +475,18 @@ open class ZLRichLabel: TTTAttributedLabel {
     /// 每个命中在展示文字（attributedText）中的范围，按位置排序，用于手势定位
     private var displayMatches: [(range: NSRange, rendered: RenderedMatch)] = []
 
-    /// 排版缓存：同一份 attributedText 只创建一次 CTFramesetter，
-    /// 按「宽度 + 行数」缓存 sizeThatFits 结果，按 textRect 缓存 CTFrame 的行与原点
-    private final class LayoutCache {
-        let text: NSAttributedString
-        let framesetter: CTFramesetter
-        var sizes: [SizeKey: CGSize] = [:]
-        /// 宽度 → 总行数（collapseThreshold 用）
-        var lineCounts: [CGFloat: Int] = [:]
-        var frameRect: CGRect?
-        var frameLines: [CTLine] = []
-        var frameOrigins: [CGPoint] = []
-
-        init(text: NSAttributedString) {
-            self.text = text
-            self.framesetter = CTFramesetterCreateWithAttributedString(text as CFAttributedString)
-        }
-    }
-
-    private struct SizeKey: Hashable {
-        let width: CGFloat
-        let numberOfLines: Int
-    }
-
-    private var layoutCacheStorage: LayoutCache?
-
-    /// TTTAttributedLabel 的 attributedText 是 copy 后保存的，内容变化时一定是新对象，按对象判断即可
-    private func layoutCache(for text: NSAttributedString) -> LayoutCache {
-        if let cache = layoutCacheStorage, cache.text === text { return cache }
-        let cache = LayoutCache(text: text)
+    /// 排版缓存在 ZLAttributedLabel 中，这里只统计
+    override func didCreateFramesetter() {
         statistics.framesetterCreations += 1
-        layoutCacheStorage = cache
-        return cache
+    }
+
+    override func didHitSizeCache() {
+        statistics.sizeCacheHits += 1
+    }
+
+    /// 按要计算的宽度决定行数（collapseThreshold 与宽度有关，不能直接用当前 bounds 下的 numberOfLines）
+    override func numberOfLines(forTextWidth width: CGFloat) -> Int {
+        return effectiveNumberOfLines(forTextWidth: width)
     }
 
     // MARK: Init
@@ -537,7 +509,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         isUserInteractionEnabled = true
         setupExpandGesture()
         // xib / storyboard 中设置的 text 会在 super.init(coder:) 期间就被解析，
-        // 此时 link 样式还是 TTT 默认的（蓝色下划线），这里按最终配置重新渲染一次
+        // 此时链接样式还是默认的（蓝色下划线），这里按最终配置重新渲染一次
         if !rawText.isEmpty { rebuild() }
     }
 
@@ -738,7 +710,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         statistics.renders += 1
 
         let baseStyle = resolvedBaseStyle
-        // TTTAttributedLabel 绘制时用 label.font 的 descender 修正基线，保持与正文字体一致
+        // 绘制时用 label.font 的 descender 修正基线，保持与正文字体一致
         if let baseFont = baseStyle[.font] as? UIFont, baseFont != font {
             font = baseFont
         }
@@ -810,7 +782,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         isRightToLeft = ZLRichLabel.detectRightToLeft(result.string)
             ?? (effectiveUserInterfaceLayoutDirection == .rightToLeft)
 
-        // Dynamic Type：缩放所有字体（含 label.font，TTT 用它修正基线）
+        // Dynamic Type：缩放所有字体（含 label.font，绘制时用它修正基线）
         applyContentSizeScaling(to: result)
         if let baseFont = baseStyle[.font] as? UIFont {
             let scaled = scaledFont(baseFont)
@@ -838,17 +810,13 @@ open class ZLRichLabel: TTTAttributedLabel {
         attributedTruncationToken = token
         activeLinkAttributes = highlightStyle.isEmpty ? [:] : highlightStyle
 
-        setText(result)
+        attributedText = result
 
         for (range, highlight, tapAction) in linkItems {
-            let checking = NSTextCheckingResult.transitInformationCheckingResult(range: range, components: [:])
-            // 按下高亮：为 nil 时 TTT 使用 activeLinkAttributes（即 highlightStyle）
-            let link = TTTAttributedLabelLink(attributes: nil,
-                                              activeAttributes: highlight,
-                                              inactiveAttributes: nil,
-                                              textCheckingResult: checking)
-            link?.linkTapBlock = { _, _ in tapAction() }
-            if let link = link { addLink(link) }
+            // 按下高亮：为 nil 时使用 activeLinkAttributes（即 highlightStyle）
+            let link = ZLLabelLink(range: range, activeAttributes: highlight)
+            link.onTap = { _, _ in tapAction() }
+            addLink(link)
         }
 
         for attachment in attachments.values.sorted(by: { $0.id < $1.id }) {
@@ -885,7 +853,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         context.attachmentFactory = nil
 
         let onTap = context.onTap
-        // TTTAttributedLabel 不绘制 NSTextAttachment，这里转换成 View 承载
+        // CoreText 不绘制 NSTextAttachment，这里转换成 View 承载
         let content = convertTextAttachments(in: context.attributedString, style: baseStyle, tapAction: nil)
         let created = attachments.values.filter { $0.id >= firstId }.sorted { $0.id < $1.id }
 
@@ -1053,8 +1021,8 @@ open class ZLRichLabel: TTTAttributedLabel {
 
         let mutable = NSMutableAttributedString(attributedString: attr)
         replaceRunDelegates(in: mutable, ids: changed)
-        // TTTAttributedLabel.setAttributedText 会重建 framesetter，且不会清空已添加的链接
-        attributedText = mutable
+        // 只替换了 CTRunDelegate：保留已添加的链接
+        replaceAttributedTextKeepingLinks(mutable)
 
         invalidateIntrinsicContentSize()
         setNeedsLayout()
@@ -1117,48 +1085,6 @@ open class ZLRichLabel: TTTAttributedLabel {
         if hasSelection { updateSelectionAppearance() }
     }
 
-    /// 修复 TTTAttributedLabel.sizeThatFits 的问题：
-    /// 设置 attributedTruncationToken 后，TTT 会把省略符拼到字符串末尾但仍使用原 framesetter，
-    /// 导致 numberOfLines == 0 时 range 越界、计算结果为 0
-    open override func sizeThatFits(_ size: CGSize) -> CGSize {
-        guard let attr = attributedText, attr.length > 0 else { return super.sizeThatFits(size) }
-        let maxValue: CGFloat = 100000
-        let horizontalInsets = textInsets.left + textInsets.right
-        let verticalInsets = textInsets.top + textInsets.bottom
-        var width = size.width - horizontalInsets
-        if width <= 0 { width = maxValue }
-
-        let cache = layoutCache(for: attr)
-        // 按要计算的宽度决定行数（collapseThreshold 与宽度有关，不能直接用当前 bounds 下的 numberOfLines）
-        let numberOfLines = effectiveNumberOfLines(forTextWidth: width)
-        let key = SizeKey(width: width, numberOfLines: numberOfLines)
-        if let cached = cache.sizes[key] {
-            statistics.sizeCacheHits += 1
-            return CGSize(width: cached.width + horizontalInsets, height: cached.height + verticalInsets)
-        }
-        let framesetter = cache.framesetter
-        var range = CFRange(location: 0, length: attr.length)
-        var constraints = CGSize(width: width, height: maxValue)
-
-        if numberOfLines == 1 {
-            constraints = CGSize(width: maxValue, height: maxValue)
-        } else if numberOfLines > 0 {
-            // 只计算前 numberOfLines 行
-            let path = CGPath(rect: CGRect(x: 0, y: 0, width: width, height: maxValue), transform: nil)
-            let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0), path, nil)
-            if let lines = CTFrameGetLines(frame) as? [CTLine], !lines.isEmpty {
-                let lastLine = lines[min(numberOfLines, lines.count) - 1]
-                let lineRange = CTLineGetStringRange(lastLine)
-                range = CFRange(location: 0, length: lineRange.location + lineRange.length)
-            }
-        }
-
-        let suggested = CTFramesetterSuggestFrameSizeWithConstraints(framesetter, range, nil, constraints, nil)
-        let fitted = CGSize(width: ceil(suggested.width), height: ceil(suggested.height))
-        cache.sizes[key] = fitted
-        return CGSize(width: fitted.width + horizontalInsets, height: fitted.height + verticalInsets)
-    }
-
     /// 支持 Auto Layout 自适应高度：宽度由约束决定，高度根据内容计算
     open override var intrinsicContentSize: CGSize {
         let width = preferredMaxLayoutWidth > 0 ? preferredMaxLayoutWidth : bounds.width
@@ -1191,7 +1117,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         }
     }
 
-    /// TTTAttributedLabel 把 `.natural` 当作左对齐处理，阿拉伯语 / 希伯来语等 RTL 文本会错误地靠左。
+    /// `.natural` 默认按界面方向对齐，阿拉伯语 / 希伯来语等 RTL 文本在 LTR 界面中会错误地靠左。
     /// 这里把 `.natural` 按内容的书写方向解析为 `.left` / `.right`
     open override var textAlignment: NSTextAlignment {
         get {
@@ -1227,23 +1153,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         return nil
     }
 
-    open override var textInsets: UIEdgeInsets {
-        didSet { setNeedsLayout() }
-    }
-
-    open override var verticalAlignment: TTTAttributedLabelVerticalAlignment {
-        didSet { setNeedsLayout() }
-    }
-
-    var flushFactor: CGFloat {
-        switch textAlignment {
-        case .center: return 0.5
-        case .right: return 1.0
-        default: return 0.0
-        }
-    }
-
-    /// 与 TTTAttributedLabel 的绘制逻辑保持一致，计算自定义 View 的位置
+    /// 与 ZLAttributedLabel 的绘制逻辑保持一致，计算自定义 View 的位置
     private func layoutAttachmentViews() {
         // 外部直接修改了 View 的尺寸（例如点击后展开）：先更新占位尺寸再布局
         let resized = externallyResizedAttachments()
@@ -1307,24 +1217,6 @@ open class ZLRichLabel: TTTAttributedLabel {
         }
     }
 
-    /// 按 textRect 排版得到的所有行与原点（缓存，内容或区域不变时直接返回）
-    func frameLines(for attr: NSAttributedString, in textRect: CGRect) -> ([CTLine], [CGPoint]) {
-        let cache = layoutCache(for: attr)
-        if cache.frameRect != textRect {
-            let path = CGPath(rect: textRect, transform: nil)
-            let frame = CTFramesetterCreateFrame(cache.framesetter, CFRange(location: 0, length: attr.length), path, nil)
-            let allLines = (CTFrameGetLines(frame) as? [CTLine]) ?? []
-            var allOrigins = [CGPoint](repeating: .zero, count: allLines.count)
-            if !allLines.isEmpty {
-                CTFrameGetLineOrigins(frame, CFRange(location: 0, length: allLines.count), &allOrigins)
-            }
-            cache.frameRect = textRect
-            cache.frameLines = allLines
-            cache.frameOrigins = allOrigins
-        }
-        return (cache.frameLines, cache.frameOrigins)
-    }
-
     // MARK: 展开 / 收起
 
     private static let expandTokenKey = NSAttributedString.Key("ZLRichLabelExpandToken")
@@ -1349,7 +1241,7 @@ open class ZLRichLabel: TTTAttributedLabel {
     private var expandTapGesture: UITapGestureRecognizer?
 
     private func setupExpandGesture() {
-        // TTT 自带的长按只作用于链接且需要 delegate，这里统一由 richLongPressGesture 处理
+        // 基类的链接长按只作用于链接，这里统一由 richLongPressGesture 处理
         longPressGestureRecognizer?.isEnabled = false
         addGestureRecognizer(richLongPressGesture)
 
@@ -1435,7 +1327,7 @@ open class ZLRichLabel: TTTAttributedLabel {
 
     // MARK: UIResponder（选中复制菜单）
 
-    /// TTTAttributedLabel 总是返回 YES，这里只在有选中时成为第一响应者
+    /// 只在有选中时成为第一响应者
     open override var canBecomeFirstResponder: Bool {
         return isSelectable && hasSelection
     }
@@ -1447,7 +1339,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         return false
     }
 
-    /// 复制选中的展示文字（TTTAttributedLabel 的实现是复制整段文字）
+    /// 复制选中的展示文字
     open override func copy(_ sender: Any?) {
         copySelection(raw: false)
     }
@@ -1462,7 +1354,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         copySelection(raw: true)
     }
 
-    /// TTTAttributedLabel 在点位有链接时直接返回 label 自身，内嵌的自定义 View（自带手势 / UIControl）收不到触摸。
+    /// 基类在点位有链接时直接返回 label 自身，内嵌的自定义 View（自带手势 / UIControl）收不到触摸。
     /// 这里先让「自己处理交互」的子 View 命中；没有自己交互的 View（以及只带内部点击的 View）仍交给链接处理
     open override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         if isUserInteractionEnabled, !isHidden, alpha >= 0.01, self.point(inside: point, with: event) {
@@ -1520,7 +1412,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         // 按在文字上时以这个字为准：不再向四周扩大查找，避免按在普通文字上却命中了上下行的链接
         guard index == NSNotFound else { return displayMatch(atCharacter: index) }
         guard extendsLinkTouchArea else { return nil }
-        // 与 TTTAttributedLabel.linkAtPoint 一致：由近到远在 8 个方向上查找可交互的命中
+        // 与 ZLAttributedLabel.link(at:) 一致：由近到远在 8 个方向上查找可交互的命中
         for radius: CGFloat in [2.5, 5, 7.5, 12.5, 15] {
             let diagonal = (2 * radius * radius).squareRoot()
             let deltas = [CGPoint(x: 0, y: -radius), CGPoint(x: 0, y: radius), CGPoint(x: -radius, y: 0),
@@ -1535,15 +1427,6 @@ open class ZLRichLabel: TTTAttributedLabel {
             }
         }
         return nil
-    }
-
-    /// TTTAttributedLabel 在手指下的字符不是链接时，会向四周最远 15pt 查找链接（extendsLinkTouchArea），
-    /// 按在普通文字上也可能高亮 / 触发上下行的链接。这里改为只在没有按在文字上（行间距、行尾空白）时才扩大查找
-    open override func link(at point: CGPoint) -> TTTAttributedLabelLink! {
-        guard extendsLinkTouchArea, characterIndex(at: point) != NSNotFound else { return super.link(at: point) }
-        extendsLinkTouchArea = false
-        defer { extendsLinkTouchArea = true }
-        return super.link(at: point)
     }
 
     /// 某个字符所在命中在展示文字中的范围
@@ -1566,47 +1449,12 @@ open class ZLRichLabel: TTTAttributedLabel {
         return nil
     }
 
-    /// 某个位置对应的字符下标（展示文字中），不在文字上时返回 `NSNotFound`。
-    /// 与 TTTAttributedLabel 的绘制位置一致（对齐方式、内边距、行数限制）
-    @objc(characterIndexAtPoint:)
-    open func characterIndex(at point: CGPoint) -> Int {
-        guard let attr = attributedText, attr.length > 0, bounds.contains(point) else { return NSNotFound }
-        let lineLimit = numberOfLines
-        let textRect = self.textRect(forBounds: bounds, limitedToNumberOfLines: lineLimit)
-        let (lines, origins) = frameLines(for: attr, in: textRect)
-        guard !lines.isEmpty else { return NSNotFound }
-        let count = lineLimit > 0 ? min(lineLimit, lines.count) : lines.count
-        let fontDescender = (font ?? UIFont.systemFont(ofSize: 17)).descender
-        let width = Double(textRect.width)
-
-        for lineIndex in 0..<count {
-            let line = lines[lineIndex]
-            var ascent: CGFloat = 0
-            var descent: CGFloat = 0
-            var leading: CGFloat = 0
-            let lineWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
-            let baselineY = textRect.minY + textRect.height - (origins[lineIndex].y - descent - fontDescender)
-            if point.y < baselineY - ascent { return NSNotFound }     // 在这一行上方（行间距）
-            if point.y > baselineY + descent + leading { continue }  // 在这一行下方
-            let penOffset = CGFloat(CTLineGetPenOffsetForFlush(line, flushFactor, width))
-            let x = point.x - textInsets.left - penOffset
-            guard x >= 0, x <= lineWidth else { return NSNotFound }
-            var index = CTLineGetStringIndexForPosition(line, CGPoint(x: x, y: 0))
-            guard index != kCFNotFound else { return NSNotFound }
-            // 返回的是离该位置最近的插入点：位置在字符左半边时插入点在字符后面，需要回退一位
-            let lineRange = CTLineGetStringRange(line)
-            if index > lineRange.location, CTLineGetOffsetForStringIndex(line, index, nil) > x { index -= 1 }
-            return min(index, attr.length - 1)
-        }
-        return NSNotFound
-    }
-
     @objc private func handleExpandTap(_ gesture: UITapGestureRecognizer) {
         guard gesture.state == .ended, !isExpanded, expandTokenRect.contains(gesture.location(in: self)) else { return }
         toggleExpanded()
     }
 
-    /// 计算是否被截断，以及「展开」按钮在 label 中的位置（与 TTTAttributedLabel 绘制的截断行一致）
+    /// 计算是否被截断，以及「展开」按钮在 label 中的位置（与绘制的截断行一致）
     private func layoutExpandToken() {
         isTruncated = false
         expandTokenRect = .zero
@@ -1647,49 +1495,6 @@ open class ZLRichLabel: TTTAttributedLabel {
         expandTokenRect = rect.insetBy(dx: -8, dy: -6)
     }
 
-    /// 复刻 TTTAttributedLabel 最后一行截断逻辑
-    func truncatedLine(for line: CTLine,
-                               in attr: NSAttributedString,
-                               lineCount: Int,
-                               width: Double) -> (line: CTLine, string: NSAttributedString)? {
-        let lastRange = CTLineGetStringRange(line)
-        guard !(lastRange.length == 0 && lastRange.location == 0),
-              lastRange.location + lastRange.length < attr.length else { return nil }
-
-        var mode = lineBreakMode
-        if lineCount != 1 { mode = .byTruncatingTail }
-
-        var position = lastRange.location
-        let type: CTLineTruncationType
-        switch mode {
-        case .byTruncatingHead:
-            type = .start
-        case .byTruncatingMiddle:
-            type = .middle
-            position += lastRange.length / 2
-        default:
-            type = .end
-            position += lastRange.length - 1
-        }
-
-        let token = attributedTruncationToken
-            ?? NSAttributedString(string: "\u{2026}", attributes: attr.attributes(at: max(0, position), effectiveRange: nil))
-        let tokenLine = CTLineCreateWithAttributedString(token as CFAttributedString)
-
-        let truncationString = NSMutableAttributedString(
-            attributedString: attr.attributedSubstring(from: NSRange(location: lastRange.location, length: lastRange.length)))
-        if lastRange.length > 0 {
-            let lastChar = (truncationString.string as NSString).character(at: lastRange.length - 1)
-            if let scalar = UnicodeScalar(lastChar), CharacterSet.newlines.contains(scalar) {
-                truncationString.deleteCharacters(in: NSRange(location: lastRange.length - 1, length: 1))
-            }
-        }
-        truncationString.append(token)
-
-        let truncationLine = CTLineCreateWithAttributedString(truncationString as CFAttributedString)
-        let result = CTLineCreateTruncatedLine(truncationLine, width, type, tokenLine) ?? tokenLine
-        return (result, truncationString)
-    }
 }
 
 // MARK: - 批量更新（Swift）
@@ -1728,8 +1533,8 @@ public extension UIView {
     }
 }
 
-/// label 自己添加的手势的代理（TTTAttributedLabel 自身是它的长按手势的代理，这里单独处理）：
-/// - 「展开」点击：只接收按钮区域内的触摸，其他位置交给 TTTAttributedLabel 处理链接
+/// label 自己添加的手势的代理（基类的链接长按手势有自己的代理，这里单独处理）：
+/// - 「展开」点击：只接收按钮区域内的触摸，其他位置交给 ZLAttributedLabel 处理链接
 /// - 长按：有 `onLongPress` 或该位置的命中设置了 `ctx.onLongPress` 时才开始
 private final class RichGestureDelegate: NSObject, UIGestureRecognizerDelegate {
     weak var label: ZLRichLabel?

@@ -17,10 +17,11 @@
 - **多语言**：阿拉伯语 / 希伯来语等 RTL 文本与双向混排
 - **轻量标记**：简易 Markdown（加粗、删除线、行内代码），或 `<b>`、`<color value="#f00">`、`<a href="…">` 这类可嵌套的 HTML 风格标签
 
-Swift 与 Objective-C 均可使用，基于 [TTTAttributedLabel](https://github.com/TTTAttributedLabel/TTTAttributedLabel)，分为两层：
+Swift 与 Objective-C 均可使用，基于 CoreText 自行实现绘制，无第三方依赖，分为三层：
 
 | 类 | 作用 |
 | --- | --- |
+| `ZLAttributedLabel` | 底层富文本 Label（继承 `UILabel`）。CoreText 绘制，支持内边距、垂直对齐、行数限制与自定义截断符、`.backgroundColor` / 删除线绘制；链接（手动添加、`.link` 属性、`NSDataDetector` 识别），默认 / 按下 / 失活样式，点击 / 长按回调与 delegate，扩大点击热区；尺寸计算与缓存；VoiceOver 下每个链接可单独聚焦和点击 |
 | `ZLRichLabel` | 基类。用**正则规则**解析文本，命中内容交给外部渲染（样式 / 替换文字 / 图片 / 自定义 View / 点击 / 按下高亮），重叠时按优先级取舍 |
 | `ZLTagRichLabel` | 继承 `ZLRichLabel`。内置标签规则：默认识别 `<h>`、`<h1>`、`<h2>` …，也可以识别任意标签名、读取标签属性、支持嵌套；按标签名区分样式、按下高亮与点击，常用于「用户协议 / 隐私政策」之类的高亮文案 |
 
@@ -53,20 +54,44 @@ Swift 与 Objective-C 均可使用，基于 [TTTAttributedLabel](https://github.
 
 ## 环境要求
 
-- iOS 13.0+（见 podspec；Example 工程使用 iOS 15.0）
+- iOS 13.0+（见 podspec / Package.swift；Example 工程使用 iOS 15.0）
 - Swift 5.0
-- 依赖 `TTTAttributedLabel`
+- 无第三方依赖（只依赖 UIKit、CoreText）
 
 ## 安装
+
+### CocoaPods
 
 ```ruby
 pod 'ZLRichLabel'
 ```
 
+### Swift Package Manager
+
+Xcode › File › Add Package Dependencies…，输入仓库地址：
+
+```text
+https://github.com/FPJack/ZLRichLabel.git
+```
+
+或在 `Package.swift` 中添加：
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/FPJack/ZLRichLabel.git", from: "1.2.0"),
+],
+targets: [
+    .target(name: "YourTarget", dependencies: ["ZLRichLabel"]),
+]
+```
+
+使用方式与 CocoaPods 相同：Swift 中 `import ZLRichLabel`，Objective-C 中 `@import ZLRichLabel;`。
+
 源码结构：
 
 ```text
 ZLRichLabel/Classes/
+├── ZLAttributedLabel.swift 底层富文本 Label：CoreText 绘制、内边距、截断、链接、尺寸计算、无障碍
 ├── ZLRichDefines.swift    样式类型 ZLTextStyle、内嵌 View 配置 ZLRichWidget
 ├── ZLRichRule.swift       ZLRichRule / ZLRichMatch / ZLRichRuleContext / ZLRichParser
 ├── ZLRichLabel.swift      基类：规则解析、渲染、内嵌 View、布局、截断、RTL、手势
@@ -167,7 +192,7 @@ handler 通过 `ctx` 读取命中信息，并写入要展示的内容：
 | `addLink(range:highlightStyle:onTap:onLongPress:)` | 给内容中的一段单独设置点击 / 长按 / 按下高亮，回调参数同样是命中；可以添加多段、可以互相包含，重叠时后添加的优先（嵌套标签就是先加外层、再加内层） |
 | `highlightStyle` | 按下高亮，`nil` 使用 label 的 `highlightStyle`，`[:]` 不高亮 |
 
-插入图片：直接放 `NSTextAttachment` 即可，组件会自动转换成 `UIImageView` 显示（TTTAttributedLabel 本身不绘制 attachment）：
+插入图片：直接放 `NSTextAttachment` 即可，组件会自动转换成 `UIImageView` 显示（CoreText 本身不绘制 attachment）：
 
 ```swift
 try? label.addRule(name: "emoji", pattern: "\\[(smile|heart)\\]") { ctx in
@@ -413,12 +438,15 @@ ZLTagParser.tags("<h1>a</h1>")        // 独立解析 <h> 标签，不创建 lab
 
 | API | 说明 |
 | --- | --- |
-| `text` | 设置 `String` 按规则解析；设置 `NSAttributedString` 不解析，按 TTTAttributedLabel 原逻辑显示；`nil` 清空。读取得到渲染后的文字 |
+| `text` | 设置 `String` 按规则解析；`nil` 清空。读取得到渲染后的文字 |
+| `attributedText` | 设置 `NSAttributedString` 不解析，按 `ZLAttributedLabel` 原逻辑直接显示 |
 | `rawText` / `tagText` | 原始字符串 |
 | `style` | 普通文本样式（未设置 font / foregroundColor 时使用 label 的 `font` / `textColor`） |
 | `highlightStyle` | 默认按下高亮样式（`ZLTagRichLabel.tagHighlightStyle` 即此属性） |
 | `truncationToken` | 截断省略符，默认带普通文本样式的 `…` |
 | `numberOfLines` / `lineBreakMode` | 多行与截断 |
+| `textInsets` | 内边距，默认 `.zero`。文字、点击热区、自定义 View、截断与「展开」都在内边距以内；`sizeThatFits` / `intrinsicContentSize` 包含内边距 |
+| `verticalAlignment` | label 比内容高时的垂直对齐：`.center`（默认）/ `.top` / `.bottom` |
 | `update { }` / `beginUpdates()` / `endUpdates()` | 批量修改，只渲染一次 |
 | `rebuild()` | 强制重新渲染：清空渲染缓存，所有 builder / handler 重新执行（外部状态变化后调用） |
 | `setNeedsRebuild(forRuleNamed:)` | 只让某条规则重新执行 handler，其他命中直接复用 |
@@ -435,6 +463,23 @@ ZLTagParser.tags("<h1>a</h1>")        // 独立解析 <h> 标签，不创建 lab
 - Auto Layout：设置宽度约束即可，高度由 `intrinsicContentSize` 计算
 - Frame 布局：`label.sizeThatFits(CGSize(width: w, height: .greatestFiniteMagnitude))`
 - RTL：`textAlignment` 为 `.natural`（默认）时，按内容的第一个强方向字符自动左 / 右对齐
+
+内边距：背景色铺满整个 label，文字在内边距以内排版，适合「气泡 / 卡片」样式，不需要再套一层容器 View：
+
+```swift
+label.textInsets = UIEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
+label.backgroundColor = .secondarySystemBackground
+label.layer.cornerRadius = 12
+label.layer.masksToBounds = true
+// Frame 布局：传入 label 的总宽度，返回的高度已包含上下内边距
+let height = label.sizeThatFits(CGSize(width: 300, height: .greatestFiniteMagnitude)).height
+```
+
+```objc
+label.textInsets = UIEdgeInsetsMake(12, 16, 12, 16);
+```
+
+SwiftUI 中在 `configure` 里设置：`ZLRichText(text, configure: { $0.textInsets = UIEdgeInsets(top: 8, left: 12, bottom: 8, right: 12) })`。
 
 xib / storyboard 中设置的文字同样会被解析。
 
@@ -503,7 +548,7 @@ tagLabel.onTagLongPress = { info in UIPasteboard.general.string = info.text }
 // 双击
 label.onDoubleTap = { info in like() }
 
-// 点击热区向四周扩大最多 15pt（TTTAttributedLabel 的属性，对 match(at:) 同样生效）
+// 点击热区向四周扩大最多 15pt（ZLAttributedLabel 的属性，对 match(at:) 同样生效；按在普通文字上时不会命中旁边的链接）
 label.extendsLinkTouchArea = true
 ```
 
@@ -527,7 +572,7 @@ label.extendsLinkTouchArea = true
 | `match` / `matchDisplayText` | 所在的规则命中，以及它在 label 上展示的文字（规则可能替换过） |
 | `rawText` / `displayText` | 原始字符串 / 渲染后的文字（图片和 View 为占位符 U+FFFC） |
 
-TTTAttributedLabel 自带的 `longPressGestureRecognizer` 只作用于链接且需要 delegate，已被禁用，统一使用 `richLongPressGesture`。
+基类 `ZLAttributedLabel` 的 `longPressGestureRecognizer` 只作用于链接，在 `ZLRichLabel` 中已被禁用，统一使用 `richLongPressGesture`。
 
 ## 选中复制
 
