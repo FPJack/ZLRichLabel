@@ -254,6 +254,13 @@ open class ZLRichLabel: TTTAttributedLabel {
     var displayPieces: [ZLDisplayPiece] = []
     /// 展示文字中属于正文的长度（不含展开后拼接的「收起」）
     var contentDisplayLength = 0
+    /// 当前内容是否包含胶囊背景 / 渐变文字（见 ZLRichLabel+Decoration.swift）
+    var hasTextBackgrounds = false
+    var hasTextGradients = false
+
+    open override func drawText(in rect: CGRect) {
+        drawDecoratedText(in: rect) { super.drawText(in: $0) }
+    }
     /// 长按开始时选中的范围（拖动时以它为锚点扩展）
     var selectionAnchor: NSRange?
     /// 正在拖动拖柄（期间菜单隐藏，不清除选中）
@@ -318,7 +325,7 @@ open class ZLRichLabel: TTTAttributedLabel {
 
     // MARK: Private
 
-    private static let attachmentKey = NSAttributedString.Key("ZLRichLabelAttachmentID")
+    static let attachmentKey = NSAttributedString.Key("ZLRichLabelAttachmentID")
     private static let attachmentChar: unichar = 0xFFFC
 
     private final class Attachment {
@@ -751,6 +758,8 @@ open class ZLRichLabel: TTTAttributedLabel {
         displayMatches = nextDisplayMatches
         displayPieces = pieces
         contentDisplayLength = result.length
+        // 胶囊背景 / 渐变文字：预留内边距、隐藏原文字颜色（只改属性，不改变字符和下标）
+        prepareDecorations(in: result, boundaries: nextDisplayMatches.map { $0.range })
         // 内容变了，之前的选中不再有效
         clearSelection()
 
@@ -1553,7 +1562,7 @@ open class ZLRichLabel: TTTAttributedLabel {
     }
 
     /// 复刻 TTTAttributedLabel 最后一行截断逻辑
-    private func truncatedLine(for line: CTLine,
+    func truncatedLine(for line: CTLine,
                                in attr: NSAttributedString,
                                lineCount: Int,
                                width: Double) -> (line: CTLine, string: NSAttributedString)? {

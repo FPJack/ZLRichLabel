@@ -883,3 +883,127 @@ class TagParserTests: XCTestCase {
         XCTAssertEqual(label.tags.map { $0.name }, ["h1"])
     }
 }
+
+// MARK: - 胶囊背景 / 渐变文字
+
+class DecorationTests: XCTestCase {
+
+    private let occurrenceKey = NSAttributedString.Key("ZLRichLabelBackgroundOccurrence")
+
+    private func makeLabel(_ text: String, background: ZLTextBackground? = nil,
+                           gradient: ZLTextGradient? = nil) -> ZLRichLabel {
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: 300, height: 0))
+        label.numberOfLines = 0
+        label.update { v in
+            v.style = [.font: UIFont.systemFont(ofSize: 20), .foregroundColor: UIColor.black]
+            try? v.addRule(name: "topic", pattern: "#\\w+#") { ctx in
+                if let background = background { ctx.addAttributes([.zlBackground: background]) }
+                if let gradient = gradient { ctx.addAttributes([.zlGradient: gradient]) }
+            }
+            v.text = text
+        }
+        let size = label.sizeThatFits(CGSize(width: 300, height: CGFloat.greatestFiniteMagnitude))
+        label.frame.size.height = ceil(size.height) + 4
+        return label
+    }
+
+    private func kern(_ label: ZLRichLabel, at index: Int) -> Double {
+        return (label.attributedText.attribute(.kern, at: index, effectiveRange: nil) as? NSNumber)?.doubleValue ?? 0
+    }
+
+    /// 渲染为 1x 位图，统计满足条件的像素数
+    private func countPixels(_ label: ZLRichLabel, where match: (UInt8, UInt8, UInt8, UInt8) -> Bool) -> Int {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(bounds: label.bounds, format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(label.bounds)
+            label.layer.render(in: context.cgContext)
+        }
+        guard let cg = image.cgImage else { return 0 }
+        let width = cg.width, height = cg.height
+        var data = [UInt8](repeating: 0, count: width * height * 4)
+        let ctx = CGContext(data: &data, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var count = 0
+        for i in stride(from: 0, to: data.count, by: 4) where match(data[i], data[i + 1], data[i + 2], data[i + 3]) {
+            count += 1
+        }
+        return count
+    }
+
+    func testBackgroundReservesPaddingWithKern() {
+        let background = ZLTextBackground(fillColor: .red, padding: UIEdgeInsets(top: 1, left: 6, bottom: 1, right: 6),
+                                          margin: 2)
+        let plain = makeLabel("Hi #swift##ios# end")
+        let label = makeLabel("Hi #swift##ios# end", background: background)
+        let display = label.attributedText.string as NSString
+        XCTAssertEqual(display as String, "Hi #swift##ios# end", "只改属性，不插入字符")
+
+        let first = display.range(of: "#swift#")
+        let second = display.range(of: "#ios#")
+        XCTAssertEqual(kern(label, at: first.location - 1), 8, "前一个字符：padding.left + margin")
+        XCTAssertEqual(kern(label, at: NSMaxRange(first) - 1), 16, "前一个胶囊的结尾 + 后一个胶囊的开头")
+        XCTAssertEqual(kern(label, at: NSMaxRange(second) - 1), 8)
+
+        // 相邻的两个命中是两个胶囊
+        var occurrences: [NSRange] = []
+        label.attributedText.enumerateAttribute(occurrenceKey, in: NSRange(location: 0, length: display.length)) { value, range, _ in
+            if value != nil { occurrences.append(range) }
+        }
+        XCTAssertEqual(occurrences, [first, second])
+
+        let plainWidth = plain.sizeThatFits(CGSize(width: 1000, height: 100)).width
+        let width = label.sizeThatFits(CGSize(width: 1000, height: 100)).width
+        XCTAssertEqual(width - plainWidth, 32, accuracy: 0.5, "两个胶囊各占 2 × (6 + 2)")
+    }
+
+    /// 紧挨着的两个胶囊不能重叠：前一个胶囊最后一个字符上的 kern 还包含了后一个胶囊的前侧空间
+    func testAdjacentCapsulesDoNotOverlap() {
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: 300, height: 40))
+        label.update { v in
+            v.style = [.font: UIFont.systemFont(ofSize: 20), .foregroundColor: UIColor.clear]
+            try? v.addRule(name: "topic", pattern: "#[^#\\s]+#") { ctx in
+                ctx.addAttributes([.zlBackground: ZLTextBackground(fillColor: UIColor.red.withAlphaComponent(0.5))])
+            }
+            v.text = "Hi #SwiftUI##UIKit# end"
+        }
+        // 单层：白底上的半透明红 ≈ (255, 128, 128)；两层重叠 ≈ (255, 64, 64)
+        let single = countPixels(label) { r, g, b, _ in r > 240 && g > 110 && g < 150 && b > 110 && b < 150 }
+        let overlap = countPixels(label) { r, g, b, _ in r > 200 && g < 100 && b < 100 }
+        XCTAssertGreaterThan(single, 200, "两个胶囊都画出来了")
+        XCTAssertEqual(overlap, 0, "两个胶囊没有重叠")
+    }
+
+    func testBackgroundAtParagraphStartUsesHeadIndent() {
+        let label = makeLabel("#swift# first\n#ios# second", background: ZLTextBackground(fillColor: .red))
+        let display = label.attributedText.string as NSString
+        for location in [0, display.range(of: "#ios#").location] {
+            let style = label.attributedText.attribute(.paragraphStyle, at: location, effectiveRange: nil) as? NSParagraphStyle
+            XCTAssertEqual(style?.firstLineHeadIndent, 8, "段落开头：用首行缩进预留 padding.left + margin")
+        }
+    }
+
+    func testBackgroundIsDrawn() {
+        let isRed: (UInt8, UInt8, UInt8, UInt8) -> Bool = { r, g, b, _ in r > 240 && g < 20 && b < 20 }
+        XCTAssertEqual(countPixels(makeLabel("Hi #swift# end"), where: isRed), 0)
+        let label = makeLabel("Hi #swift# end", background: ZLTextBackground(fillColor: .red))
+        XCTAssertGreaterThan(countPixels(label, where: isRed), 200, "画出了红色背景")
+    }
+
+    func testGradientTextIsDrawnInsteadOfOriginalColor() {
+        let isGreen: (UInt8, UInt8, UInt8, UInt8) -> Bool = { r, g, b, _ in g > 200 && r < 60 && b < 60 }
+        let isDark: (UInt8, UInt8, UInt8, UInt8) -> Bool = { r, g, b, _ in r < 60 && g < 60 && b < 60 }
+        let green = UIColor(red: 0, green: 1, blue: 0, alpha: 1)
+
+        let plain = makeLabel("#gradient#")
+        XCTAssertGreaterThan(countPixels(plain, where: isDark), 20)
+
+        let label = makeLabel("#gradient#", gradient: ZLTextGradient(colors: [green, green]))
+        XCTAssertEqual(label.attributedText.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor, .clear)
+        XCTAssertGreaterThan(countPixels(label, where: isGreen), 20, "字形区域填充了渐变")
+        XCTAssertEqual(countPixels(label, where: isDark), 0, "原来的黑色文字不再绘制")
+    }
+}

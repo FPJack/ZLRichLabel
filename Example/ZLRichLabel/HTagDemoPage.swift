@@ -107,6 +107,8 @@ final class HTagDemoPage: UIViewController {
         case26()
         // 通用标签：任意标签名 / 属性 / 嵌套
         case27()
+        // 胶囊背景 / 渐变文字
+        case28()
         stackView.addArrangedSubview(historyCard)
 
         refreshTapViews()
@@ -846,6 +848,69 @@ final class HTagDemoPage: UIViewController {
                 self?.onTap(name, info, action: "onTagTap  \(path)")
             }
             v.tagHighlightStyles = ["br": [:], "icon": [:]]
+        }
+    }
+
+    // MARK: - 胶囊背景 / 渐变文字
+
+    /// 28. 胶囊背景（圆角背景 / 边框 / 内边距）与渐变文字，由 label 自己绘制
+    private func case28() {
+        let name = "28. 胶囊背景 / 渐变文字"
+        let source = "<grad>Swift 富文本</grad> <new>NEW</new>\n"
+            + "话题：#iOS开发# #SwiftUI##UIKit# 点击胶囊有按下效果。"
+            + "行内代码 `label.text = value` 和 `rebuild()`。"
+            + "<tag>只有边框</tag> <tag>Tag</tag> "
+            + "<rainbow>竖向渐变 + 跨行的长胶囊也能正确绘制，每一行单独一段</rainbow>，"
+            + "<pill>很长的胶囊文字在折行时会分成两段分别绘制</pill>。"
+
+        addCase(name, source: source) { [weak self] v in
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineSpacing = 6   // 胶囊的垂直内边距不占行高，加一点行距避免上下行重叠
+            v.style = HTagDemoPage.baseStyle.merging([.paragraphStyle: paragraph]) { $1 }
+            v.tagConfiguration = .anyTags
+            v.tagStyles = [
+                // 渐变标题
+                "grad": [.font: UIFont.boldSystemFont(ofSize: 22),
+                         .zlGradient: ZLTextGradient(colors: [.mPink, .mOrange, .mDeepPurple])],
+                // 实心小徽章
+                "new": [.font: UIFont.boldSystemFont(ofSize: 11), .foregroundColor: UIColor.white,
+                        .baselineOffset: 3,
+                        .zlBackground: ZLTextBackground(fillColor: .mDeepOrange, cornerRadius: 4,
+                                                        padding: UIEdgeInsets(top: 2, left: 4, bottom: 2, right: 4))],
+                // 只有边框
+                "tag": [.foregroundColor: UIColor.mTeal, .font: UIFont.systemFont(ofSize: 13),
+                        .zlBackground: ZLTextBackground(strokeColor: .mTeal, lineWidth: 1, cornerRadius: -1)],
+                // 竖向渐变
+                "rainbow": [.font: UIFont.boldSystemFont(ofSize: 15),
+                            .zlGradient: ZLTextGradient(colors: [.mBlue, .mGreen], startPoint: CGPoint(x: 0.5, y: 0),
+                                                        endPoint: CGPoint(x: 0.5, y: 1))],
+                // 跨行的胶囊
+                "pill": [.foregroundColor: UIColor.mIndigo,
+                         .zlBackground: ZLTextBackground.capsule(.mIndigo)],
+            ]
+            // 按下高亮：换成更深的胶囊
+            v.tagHighlightStyles = [
+                "tag": [.zlBackground: ZLTextBackground(fillColor: UIColor.mTeal.withAlphaComponent(0.15),
+                                                        strokeColor: .mTeal, cornerRadius: -1)],
+                "pill": [.zlBackground: ZLTextBackground(fillColor: UIColor.mIndigo.withAlphaComponent(0.3))],
+            ]
+            // #话题#：胶囊 + 点击
+            try? v.addRule(name: "topic", pattern: "#[^#\\s]+#") { ctx in
+                let topic = ctx.matchedText
+                ctx.addAttributes([.foregroundColor: UIColor.mPurple, .zlBackground: ZLTextBackground.capsule(.mPurple)])
+                ctx.highlightStyle = [.zlBackground: ZLTextBackground(fillColor: UIColor.mPurple.withAlphaComponent(0.3))]
+                ctx.onTap = {
+                    self?.onTap(name, HTagInfo(index: 0, name: "topic", text: topic, raw: topic), action: "点击话题")
+                }
+            }
+            // `代码`：去掉反引号，等宽字体 + 灰色背景 + 细边框
+            try? v.addRule(name: "code", pattern: "`([^`]+)`") { ctx in
+                ctx.setText(ctx.group(1) ?? "", attributes: [
+                    .font: UIFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+                    .foregroundColor: UIColor.mDeepOrange,
+                    .zlBackground: ZLTextBackground.code,
+                ])
+            }
         }
     }
 

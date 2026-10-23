@@ -616,6 +616,8 @@ static NSString *OCQuote(NSString *s) {
     [self case26];
     // 通用标签：任意标签名 / 属性 / 嵌套
     [self case27];
+    // 胶囊背景 / 渐变文字
+    [self case28];
     [self.stackView addArrangedSubview:self.historyCard];
 
     [self refreshTapViews];
@@ -1412,6 +1414,89 @@ static NSString *OCQuote(NSString *s) {
                      action:[@"onTagTap  " stringByAppendingString:[path componentsJoinedByString:@" › "]]];
         };
         v.tagHighlightStyles = @{@"br": @{}, @"icon": @{}};
+    }];
+}
+
+#pragma mark - 胶囊背景 / 渐变文字
+
+/// 28. 胶囊背景（圆角背景 / 边框 / 内边距）与渐变文字，由 label 自己绘制
+- (void)case28 {
+    NSString *name = @"28. 胶囊背景 / 渐变文字";
+    NSString *source = @"<grad>Swift 富文本</grad> <new>NEW</new>\n"
+        @"话题：#iOS开发# #SwiftUI##UIKit# 点击胶囊有按下效果。"
+        @"行内代码 `label.text = value` 和 `rebuild()`。"
+        @"<tag>只有边框</tag> <tag>Tag</tag> "
+        @"<rainbow>竖向渐变 + 跨行的长胶囊也能正确绘制，每一行单独一段</rainbow>，"
+        @"<pill>很长的胶囊文字在折行时会分成两段分别绘制</pill>。";
+
+    __weak typeof(self) weakSelf = self;
+    [self addCase:name source:source configure:^(ZLTagRichLabel *v) {
+        NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
+        paragraph.lineSpacing = 6;   // 胶囊的垂直内边距不占行高，加一点行距避免上下行重叠
+        NSMutableDictionary *style = [OCDemoViewController.baseStyle mutableCopy];
+        style[NSParagraphStyleAttributeName] = paragraph;
+        v.style = style;
+        v.tagNamePattern = HTagParser.anyTagNamePattern;
+        v.allowsNestedTags = YES;
+
+        ZLTextBackground *badge = [ZLTextBackground backgroundWithFillColor:kDeepOrange strokeColor:nil cornerRadius:4];
+        badge.padding = UIEdgeInsetsMake(2, 4, 2, 4);
+        ZLTextBackground *outline = [ZLTextBackground backgroundWithFillColor:nil strokeColor:kTeal cornerRadius:-1];
+        ZLTextGradient *vertical = [ZLTextGradient gradientWithColors:@[kBlue, kGreen]];
+        vertical.startPoint = CGPointMake(0.5, 0);
+        vertical.endPoint = CGPointMake(0.5, 1);
+
+        v.tagStyles = @{
+            // 渐变标题
+            @"grad": @{NSFontAttributeName: [UIFont boldSystemFontOfSize:22],
+                       ZLRichLabel.textGradientAttributeName: [ZLTextGradient gradientWithColors:@[kPink, kOrange, kDeepPurple]]},
+            // 实心小徽章
+            @"new": @{NSFontAttributeName: [UIFont boldSystemFontOfSize:11],
+                      NSForegroundColorAttributeName: UIColor.whiteColor,
+                      NSBaselineOffsetAttributeName: @3,
+                      ZLRichLabel.textBackgroundAttributeName: badge},
+            // 只有边框
+            @"tag": @{NSForegroundColorAttributeName: kTeal, NSFontAttributeName: [UIFont systemFontOfSize:13],
+                      ZLRichLabel.textBackgroundAttributeName: outline},
+            // 竖向渐变
+            @"rainbow": @{NSFontAttributeName: [UIFont boldSystemFontOfSize:15],
+                          ZLRichLabel.textGradientAttributeName: vertical},
+            // 跨行的胶囊
+            @"pill": @{NSForegroundColorAttributeName: kIndigo,
+                       ZLRichLabel.textBackgroundAttributeName: [ZLTextBackground capsule:kIndigo]},
+        };
+        // 按下高亮：换成更深的胶囊
+        v.tagHighlightStyles = @{
+            @"tag": @{ZLRichLabel.textBackgroundAttributeName:
+                          [ZLTextBackground backgroundWithFillColor:[kTeal colorWithAlphaComponent:0.15]
+                                                        strokeColor:kTeal cornerRadius:-1]},
+            @"pill": @{ZLRichLabel.textBackgroundAttributeName:
+                           [ZLTextBackground backgroundWithFillColor:[kIndigo colorWithAlphaComponent:0.3]
+                                                         strokeColor:nil cornerRadius:-1]},
+        };
+        // #话题#：胶囊 + 点击
+        [v addRuleWithName:@"topic" pattern:@"#[^#\\s]+#" options:0 priority:0 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            NSString *topic = ctx.matchedText;   // 不要在 onTap 里强引用 ctx
+            [ctx addAttributes:@{NSForegroundColorAttributeName: kPurple,
+                                 ZLRichLabel.textBackgroundAttributeName: [ZLTextBackground capsule:kPurple]}];
+            ctx.highlightStyle = @{ZLRichLabel.textBackgroundAttributeName:
+                                       [ZLTextBackground backgroundWithFillColor:[kPurple colorWithAlphaComponent:0.3]
+                                                                     strokeColor:nil cornerRadius:-1]};
+            ctx.onTap = ^{
+                HTagInfo *info = [[HTagInfo alloc] initWithIndex:0 name:@"topic" text:topic raw:topic];
+                [weakSelf onTap:name info:info action:@"点击话题"];
+            };
+        }];
+        // `代码`：去掉反引号，等宽字体 + 灰色背景 + 细边框
+        [v addRuleWithName:@"code" pattern:@"`([^`]+)`" options:0 priority:0 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            [ctx setText:[ctx groupAtIndex:1] ?: @"" attributes:@{
+                NSFontAttributeName: [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular],
+                NSForegroundColorAttributeName: kDeepOrange,
+                ZLRichLabel.textBackgroundAttributeName: ZLTextBackground.code,
+            }];
+        }];
     }];
 }
 

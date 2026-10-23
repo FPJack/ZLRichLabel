@@ -40,6 +40,7 @@ Swift 与 Objective-C 均可使用，基于 [TTTAttributedLabel](https://github.
 - `<h>` 标签：`<h>`、`<h1>`…`<hN>`，`</h1>` 和 `<h1/>` 两种闭合写法，不区分大小写；按标签名区分样式与点击；可替换为自定义 View
 - 通用标签：可识别任意标签名（`<b>`、`<a href="…">`、`<color value="#f00">`），解析标签属性，支持嵌套（内层继承外层样式、点击内层优先）和自闭合标签（`<br/>`、`<icon name="star"/>`）
 - 容错：开闭不匹配、未闭合的标签原样显示，不影响后面的标签
+- 胶囊背景（圆角背景 / 边框 / 内边距，适合 #话题#、`code`、标签徽章）与渐变文字，由 label 自己绘制，跨行时逐行绘制
 - 多行截断（自定义省略符）、Auto Layout 自适应高度
 - 展开 / 收起：截断时末尾显示可点击的「… 全文」，展开后显示「收起」
 - 长按（整体 / 按命中 / 按标签）、双击、扩大点击热区，可按坐标查询字符和命中
@@ -69,6 +70,7 @@ ZLRichLabel/Classes/
 ├── ZLRichRule.swift       TagRichRule / TagRichMatch / TagRichRuleContext / TagRichParser
 ├── ZLRichLabel.swift      基类：规则解析、渲染、内嵌 View、布局、截断、RTL、手势
 ├── ZLRichLabel+Selection.swift  选中复制：选中范围、拖柄、菜单、展示文字与原文的对应
+├── ZLRichLabel+Decoration.swift 胶囊背景 / 渐变文字的属性与绘制
 ├── ZLTagParser.swift      通用标签解析：任意标签名、属性、嵌套、自闭合、容错
 └── ZLTagRichLabel.swift   标签子类、HTagInfo、HTagParser
 ```
@@ -432,6 +434,50 @@ HTagParser.tags("<h1>a</h1>")        // 独立解析 <h> 标签，不创建 labe
 
 xib / storyboard 中设置的文字同样会被解析。
 
+## 胶囊背景 / 渐变文字
+
+给一段文字加上属性即可，规则 handler、`style`、`tagStyles`、按下高亮里都能用：
+
+```swift
+// #话题#：浅色胶囊
+try? label.addRule(name: "topic", pattern: "#[^#\\s]+#") { ctx in
+    ctx.addAttributes([.foregroundColor: UIColor.systemPurple,
+                       .zlBackground: ZLTextBackground.capsule(.systemPurple)])
+    // 按下时换成更深的背景
+    ctx.highlightStyle = [.zlBackground: ZLTextBackground(fillColor: UIColor.systemPurple.withAlphaComponent(0.3))]
+}
+// `代码`：去掉反引号，灰色背景 + 细边框
+try? label.addRule(name: "code", pattern: "`([^`]+)`") { ctx in
+    ctx.setText(ctx.group(1) ?? "", attributes: [.font: UIFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+                                                  .zlBackground: ZLTextBackground.code])
+}
+// 渐变文字
+label.tagStyles = ["grad": [.font: UIFont.boldSystemFont(ofSize: 22),
+                            .zlGradient: ZLTextGradient(colors: [.systemPink, .systemOrange, .systemPurple])]]
+```
+
+`ZLTextBackground`：
+
+| 属性 | 说明 |
+| --- | --- |
+| `fillColor` | 填充色，nil 不填充 |
+| `strokeColor` / `lineWidth` | 边框颜色 / 宽度，`strokeColor` 为 nil 时没有边框 |
+| `cornerRadius` | 圆角，小于 0（默认 -1）时为高度的一半，两端是半圆 |
+| `padding` | 文字到背景边缘的距离，默认上下 1、左右 6 |
+| `margin` | 背景外侧与相邻文字的水平间距，默认 2 |
+| `capsule(_:)` / `code` | 预设：浅色胶囊 / 行内代码 |
+
+`ZLTextGradient`：`colors`、`locations`（nil 时均匀分布）、`startPoint` / `endPoint`（单位坐标，默认从左到右；竖向渐变用 `(0.5, 0)` → `(0.5, 1)`）。
+
+说明：
+
+- **水平内边距占用排版空间**：组件用 kern 在胶囊两侧预留 `padding + margin`（位于段落开头时用首行缩进），不插入任何字符，所以展示文字、原文、点击范围、选中都不受影响。
+- **垂直内边距不占行高**，只影响绘制；多行文本请适当设置 `lineSpacing`，避免背景和上下行重叠。
+- **跨行**：胶囊和渐变都按行分段绘制；位于折行开头 / 结尾的一段不会超出 label。
+- 相邻的两个命中即使用的是同一个 `ZLTextBackground` 实例，也是两个独立的胶囊。
+- 渐变文字的原颜色会被设为透明，下划线 / 删除线因此也不显示。
+- 从右到左（RTL）文本中，胶囊左右内边距的位置可能不够精确。
+
 ## 长按 / 双击 / 点击热区
 
 ```swift
@@ -660,6 +706,9 @@ label.numberOfLines = 0;
 | `tagConfiguration = .anyTags` | `tagNamePattern = HTagParser.anyTagNamePattern; allowsNestedTags = YES; allowsSelfClosingTags = YES;` |
 | `info.attribute("href")` / `info.colorAttribute("value")` | `[info attributeNamed:@"href"]` / `[info colorAttributeNamed:@"value"]` |
 | `ZLTagParser.tags(in:configuration:)` | `[HTagParser tagsInString:namePattern:allowsNesting:allowsSelfClosing:]` |
+| `.zlBackground` / `.zlGradient` | `ZLRichLabel.textBackgroundAttributeName` / `ZLRichLabel.textGradientAttributeName` |
+| `ZLTextBackground(fillColor:strokeColor:cornerRadius:)` | `[ZLTextBackground backgroundWithFillColor:strokeColor:cornerRadius:]` |
+| `ZLTextGradient(colors:)` | `[ZLTextGradient gradientWithColors:]` |
 
 ## Example
 
@@ -685,6 +734,7 @@ open ZLRichLabel.xcworkspace
 | 25 | 长按菜单（复制原文 / 展示文字、举报）、@提及与标签各自的长按、双击点赞、扩大点击热区 |
 | 26 | 选中复制：长按选词、拖柄调整，「复制」展示文字 /「复制原文」，下方实时显示 selectedText / selectedRawText |
 | 27 | 通用标签：`<b>` `<i>` `<u>` `<color value>` `<size value>` `<a href>`、自闭合 `<br/>` `<icon/>`、嵌套（内层继承外层样式、点击内层优先）、容错；卡片下方按嵌套缩进显示属性 |
+| 28 | 胶囊背景 / 渐变文字：#话题# 胶囊（按下变深）、行内代码、实心徽章、只有边框的标签、横向 / 竖向渐变、跨行的胶囊 |
 
 页面顶部会显示最近一次点击得到的完整信息，底部有点击历史。
 
