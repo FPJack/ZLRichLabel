@@ -127,9 +127,16 @@ final class HTagDemoPage: UIViewController {
         let clear = UIBarButtonItem(barButtonSystemItem: .trash, target: self, action: #selector(clearHistory))
         clear.accessibilityLabel = "清空点击记录"
         let swiftUI = UIBarButtonItem(title: "SwiftUI", style: .plain, target: self, action: #selector(openSwiftUIDemo))
-        navigationItem.rightBarButtonItems = [clear, swiftUI]
+        let base = UIBarButtonItem(title: "Base", style: .plain, target: self, action: #selector(openAttributedLabelDemo))
+        base.accessibilityLabel = "ZLAttributedLabel 示例"
+        navigationItem.rightBarButtonItems = [clear, swiftUI, base]
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "OC", style: .plain,
                                                            target: self, action: #selector(openOCDemo))
+    }
+
+    /// 底层 ZLAttributedLabel 示例页（AttributedLabelDemoPage.swift）：富文本绘制、链接、内边距、截断等
+    @objc private func openAttributedLabelDemo() {
+        navigationController?.pushViewController(AttributedLabelDemoPage(), animated: true)
     }
 
     /// SwiftUI 示例页（SwiftUIDemoPage.swift）：ZLRichText 封装
@@ -1675,7 +1682,7 @@ private final class PaddingLabel: UILabel {
 
 // MARK: - Material 颜色
 
-private extension UIColor {
+extension UIColor {
     static func dynamic(light: UIColor, dark: UIColor) -> UIColor {
         return UIColor { $0.userInterfaceStyle == .dark ? dark : light }
     }

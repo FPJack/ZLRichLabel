@@ -78,7 +78,7 @@ https://github.com/FPJack/ZLRichLabel.git
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/FPJack/ZLRichLabel.git", from: "1.2.0"),
+    .package(url: "https://github.com/FPJack/ZLRichLabel.git", from: "2.0.0"),
 ],
 targets: [
     .target(name: "YourTarget", dependencies: ["ZLRichLabel"]),
@@ -154,6 +154,20 @@ label.update { v in
 
     v.text = "Hi @alice, see https://www.apple.com"
 }
+```
+
+### 富文本与链接：ZLAttributedLabel
+
+不需要规则解析、只想显示 `NSAttributedString` 并添加链接时，直接用底层 Label：
+
+```swift
+let label = ZLAttributedLabel(frame: .zero)
+label.numberOfLines = 0
+label.textInsets = UIEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+label.text = "阅读并同意《用户协议》，或访问 https://www.apple.com"
+label.enabledTextCheckingTypes = NSTextCheckingResult.CheckingType.link.rawValue   // 自动识别网址
+label.addLink(range: (label.text! as NSString).range(of: "《用户协议》")) { _, _ in openAgreement() }
+label.delegate = self   // ZLAttributedLabelDelegate：URL 链接 / 识别结果的点击与长按
 ```
 
 ## 自定义规则
@@ -433,6 +447,94 @@ label.tags                           // 当前所有标签 [ZLTagInfo]
 label.ruleMatches                    // 当前所有自定义规则命中（不含 <h> 标签）
 ZLTagParser.tags("<h1>a</h1>")        // 独立解析 <h> 标签，不创建 label
 ```
+
+## ZLAttributedLabel（底层富文本 Label）
+
+`ZLAttributedLabel` 继承 `UILabel`，用 CoreText 自行绘制，是 `ZLRichLabel` 的父类，也可以单独使用（替代 TTTAttributedLabel）。
+`ZLRichLabel` / `ZLTagRichLabel` 自动拥有下面所有能力。
+
+### 文字
+
+| API | 说明 |
+| --- | --- |
+| `text` | 纯文本，使用 label 的 `font` / `textColor` / `textAlignment` / `lineBreakMode`；之后修改这些属性会自动重新生成 |
+| `attributedText` | 富文本，原样显示；`.link` 属性的范围自动成为链接 |
+| `.backgroundColor` / `.strikethroughStyle` / `.strikethroughColor` | CoreText 不绘制，由 label 补充绘制 |
+| `shadowColor` / `shadowOffset` / `shadowRadius` | 整段文字阴影，`shadowRadius` 为新增的模糊半径 |
+| `isHighlighted` / `highlightedTextColor` | 高亮时全部文字使用 `highlightedTextColor`（与 `UILabel` 一致） |
+| `labelAttributes()` | 由 `font` / `textColor` / 对齐等生成的默认属性，子类可重写 |
+
+### 布局
+
+| API | 说明 |
+| --- | --- |
+| `textInsets` | 内边距，默认 `.zero`；尺寸计算、点击、截断、字符定位都按内边距偏移 |
+| `verticalAlignment` | label 比内容高时的垂直对齐：`.center`（默认）/ `.top` / `.bottom`（OC：`ZLLabelVerticalAlignmentTop` 等） |
+| `numberOfLines` / `lineBreakMode` | 行数限制与截断；多行时只截断最后一行（尾部），单行时支持头 / 中 / 尾 |
+| `attributedTruncationToken` | 自定义截断符，例如「…更多」，nil 时为 `…` |
+| `sizeThatFits(_:)` / `intrinsicContentSize` | 包含内边距，按「宽度 + 行数」缓存；多行时 Auto Layout 宽度变化后自动重新计算高度 |
+| `preferredMaxLayoutWidth` | 大于 0 时 `intrinsicContentSize` 按这个宽度计算 |
+
+### 链接
+
+| API | 说明 |
+| --- | --- |
+| `addLink(to:range:)` | 添加 URL 链接，点击回调 delegate 的 `didSelectLinkWith url` |
+| `addLink(range:attributes:onTap:)` | 添加带回调的链接，返回 `ZLLabelLink`（可再设置 `onLongPress`） |
+| `addLink(_:)` | 添加自定义的 `ZLLabelLink`：可单独设置 `attributes` / `activeAttributes` / `inactiveAttributes`、`onTap` / `onLongPress`、`accessibilityHintText` |
+| `removeAllLinks()` / `links` | 移除 / 读取所有链接，后添加的优先响应 |
+| `enabledTextCheckingTypes` | 用 `NSDataDetector` 自动识别网址、电话、日期、地址等，识别结果在 `link.result` |
+| `linkAttributes` / `activeLinkAttributes` / `inactiveLinkAttributes` | 链接默认 / 按下 / 失活（弹出 alert 等 `tintAdjustmentMode == .dimmed` 时）样式 |
+| `extendsLinkTouchArea` | 手指没有按在文字上时向四周最多 15pt 查找链接；按在普通文字上时不会命中旁边的链接 |
+| `longPressGestureRecognizer` | 只在按在链接上时开始，可调整 `minimumPressDuration` |
+| `delegate` | `ZLAttributedLabelDelegate`，见下 |
+| `link(at:)` / `containsLink(at:)` / `link(atCharacter:)` / `activeLink` | 按坐标 / 字符查询链接，当前按下的链接 |
+| `performTap(on:)` | 以代码触发一次链接点击（与用户点击走同样的回调） |
+
+点击的回调顺序：链接设置了 `onTap` 时只调用 `onTap`；否则带 URL 的链接调用 `didSelectLinkWith url`（未实现时退回 `didSelect link`），其他链接调用 `didSelect link`。
+长按同理：`onLongPress` 优先，否则调用 `didLongPress link at point`。
+
+```swift
+extension ViewController: ZLAttributedLabelDelegate {
+    func attributedLabel(_ label: ZLAttributedLabel, didSelectLinkWith url: URL) { UIApplication.shared.open(url) }
+    func attributedLabel(_ label: ZLAttributedLabel, didSelect link: ZLLabelLink) {
+        if let phone = link.result?.phoneNumber { print("call", phone) }
+    }
+    func attributedLabel(_ label: ZLAttributedLabel, didLongPress link: ZLLabelLink, at point: CGPoint) { }
+}
+
+// 自定义样式的链接：橙底白字，按下变深
+let link = ZLLabelLink(range: range,
+                       attributes: [.foregroundColor: UIColor.white, .backgroundColor: UIColor.systemOrange],
+                       activeAttributes: [.backgroundColor: UIColor.brown])
+link.onTap = { label, link in print(link.range) }
+link.onLongPress = { label, link in showMenu() }
+label.addLink(link)
+```
+
+### 定位与无障碍
+
+| API | 说明 |
+| --- | --- |
+| `characterIndex(at:)` | 坐标处的字符下标，没有按在文字上时为 `NSNotFound` |
+| `boundingRect(forCharacterRange:)` | 一段文字在 label 坐标系中的矩形（不含行尾空格） |
+| VoiceOver | 有链接时 label 作为容器：整段文字 + 每个链接，链接可单独聚焦、双击触发点击；`ZLLabelLink.accessibilityHintText` 为附加说明 |
+
+### Objective-C
+
+```objc
+ZLAttributedLabel *label = [[ZLAttributedLabel alloc] initWithFrame:CGRectZero];
+label.numberOfLines = 0;
+label.textInsets = UIEdgeInsetsMake(8, 12, 8, 12);
+label.verticalAlignment = ZLLabelVerticalAlignmentTop;
+label.text = @"阅读并同意《用户协议》";
+[label addLinkWithRange:[label.text rangeOfString:@"《用户协议》"] attributes:nil
+                  onTap:^(ZLAttributedLabel *l, ZLLabelLink *link) { NSLog(@"agreement"); }];
+[label addLinkToURL:[NSURL URLWithString:@"https://www.apple.com"] withRange:range];
+label.delegate = self;   // attributedLabel:didSelectLinkWithURL: / attributedLabel:didSelectLink: / attributedLabel:didLongPressLink:atPoint:
+```
+
+暂不支持：`adjustsFontSizeToFitWidth`；`NSTextAttachment` 图片由 `ZLRichLabel` 转换成 View 显示，`ZLAttributedLabel` 本身不绘制附件。
 
 ## 通用配置
 
@@ -828,11 +930,22 @@ Objective-C 不支持类型别名，请直接改用新类名。
 
 ```bash
 cd Example
-pod install
+pod install          # 只安装测试用的 FBSnapshotTestCase
 open ZLRichLabel.xcworkspace
 ```
 
-示例 App 包含 Swift（`HTagDemoPage.swift`）和 Objective-C（`OCDemoViewController.m`，导航栏左上角「OC」进入）两个版本，内容一致；SwiftUI 示例（`SwiftUIDemoPage.swift`）从导航栏右上角「SwiftUI」进入，演示基础用法与点击、输入时高度实时变化、展开 / 收起与 `@State` 同步、`.lineLimit`、规则 + 胶囊 + 渐变、`List` 中自适应行高：
+Example 工程通过 Swift Package Manager 引用仓库根目录的本地包（`..`），修改库源码后直接生效。
+
+示例 App 包含 4 个页面：
+
+| 页面 | 入口 | 内容 |
+| --- | --- | --- |
+| `HTagDemoPage.swift` | 首页 | `ZLTagRichLabel` / `ZLRichLabel` 全部功能，用例 1 – 29（见下表） |
+| `OCDemoViewController.m` | 导航栏左上角「OC」 | 与首页内容一致的 Objective-C 版本 |
+| `SwiftUIDemoPage.swift` | 导航栏右上角「SwiftUI」 | `ZLRichText`：基础用法与点击、输入时高度实时变化、展开 / 收起与 `@State` 同步、`.lineLimit`、规则 + 胶囊 + 渐变、`List` 中自适应行高 |
+| `AttributedLabelDemoPage.swift` | 导航栏右上角「Base」 | 底层 `ZLAttributedLabel`，用例 1 – 12（见下表） |
+
+首页用例：
 
 | 用例 | 内容 |
 | --- | --- |
@@ -849,8 +962,26 @@ open ZLRichLabel.xcworkspace
 | 26 | 选中复制：长按选词、拖柄调整，「复制」展示文字 /「复制原文」，下方实时显示 selectedText / selectedRawText |
 | 27 | 通用标签：`<b>` `<i>` `<u>` `<color value>` `<size value>` `<a href>`、自闭合 `<br/>` `<icon/>`、嵌套（内层继承外层样式、点击内层优先）、容错；卡片下方按嵌套缩进显示属性 |
 | 28 | 胶囊背景 / 渐变文字：#话题# 胶囊（按下变深）、行内代码、实心徽章、只有边框的标签、横向 / 竖向渐变、跨行的胶囊 |
+| 29 | 内边距 `textInsets`：圆角背景的 label 切换 0 / 8 / 12·16 / 24 内边距，文字重新折行；链接、内嵌标签、展开 / 收起都在内边距以内 |
 
 页面顶部会显示最近一次点击得到的完整信息，底部有点击历史。
+
+`ZLAttributedLabel` 页面用例（顶部显示最近一次回调）：
+
+| 用例 | 内容 |
+| --- | --- |
+| 1 | 纯文本 `text`：切换 `font` / `textColor` / `textAlignment` 后自动更新 |
+| 2 | 富文本 `attributedText`：颜色、粗体、字号、下划线、背景色、删除线 / 双删除线 / 删除线颜色、字间距、段落行距与首行缩进、`shadowRadius` 阴影 |
+| 3 | 内边距 `textInsets` + 垂直对齐 `verticalAlignment`：固定高度的 label 切换内边距与 top / center / bottom |
+| 4 | 行数与截断：1 行 / 2 行 / 不限，尾部 / 头部 / 中间截断，`attributedTruncationToken` 自定义「…更多」 |
+| 5 | 链接：`.link` 属性、`addLink(to:range:)`、`addLink(range:onTap:)` 计数、自定义样式的 `ZLLabelLink`（橙色胶囊，按下变深） |
+| 6 | 自动识别 `enabledTextCheckingTypes`：网址、电话、日期、地址 |
+| 7 | 长按链接：`onLongPress` 与 delegate 的 `didLongPress`，调整 `minimumPressDuration` |
+| 8 | 扩大点击热区 `extendsLinkTouchArea`：开关对比，行距较大时点击链接上下的空白 |
+| 9 | 失活样式 `inactiveLinkAttributes`：弹出 alert 时链接变灰 |
+| 10 | 高亮 `isHighlighted` / `highlightedTextColor` |
+| 11 | 尺寸与定位：点击文字用 `characterIndex(at:)` + `boundingRect(forCharacterRange:)` 框出所在的词；Frame 布局下用 `sizeThatFits` 计算高度 |
+| 12 | VoiceOver：打印 `accessibilityElements`，链接单独聚焦，`accessibilityHintText` |
 
 ## Author
 

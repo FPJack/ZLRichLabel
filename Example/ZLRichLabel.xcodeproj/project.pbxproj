@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 54;
+	objectVersion = 60;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -15,6 +15,7 @@
 		607FACE01AFB9204008FA782 /* LaunchScreen.xib in Resources */ = {isa = PBXBuildFile; fileRef = 607FACDE1AFB9204008FA782 /* LaunchScreen.xib */; };
 		607FACEC1AFB9204008FA782 /* Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 607FACEB1AFB9204008FA782 /* Tests.swift */; };
 		8447DF5B308AFBA800B30B72 /* OCDemoViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 8447DF5A308AFBA800B30B72 /* OCDemoViewController.m */; };
+		8447DF5D308AFBA800B30B72 /* AttributedLabelDemoPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8447DF5E308AFBA800B30B72 /* AttributedLabelDemoPage.swift */; };
 		8447DF5C308AFBA800B30B72 /* HTagDemoPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8447DF59308AFBA800B30B72 /* HTagDemoPage.swift */; };
 		8465EBCD308B5B95009E1C9A /* ZLRichLabel in Frameworks */ = {isa = PBXBuildFile; productRef = 8465EBCC308B5B95009E1C9A /* ZLRichLabel */; };
 		A1B2C3D4E5F6A7B8C9D0E1F1 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* SceneDelegate.swift */; };
@@ -48,6 +49,7 @@
 		607FACEA1AFB9204008FA782 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		607FACEB1AFB9204008FA782 /* Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests.swift; sourceTree = "<group>"; };
 		70741C9BEA80660FB0441EB2 /* Pods_ZLRichLabel_Example.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_ZLRichLabel_Example.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		8447DF5E308AFBA800B30B72 /* AttributedLabelDemoPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttributedLabelDemoPage.swift; sourceTree = "<group>"; };
 		8447DF59308AFBA800B30B72 /* HTagDemoPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTagDemoPage.swift; sourceTree = "<group>"; };
 		8447DF5A308AFBA800B30B72 /* OCDemoViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = OCDemoViewController.m; sourceTree = "<group>"; };
 		8447DF5D308AFBAC00B30B72 /* ZLRichLabel_Example-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "ZLRichLabel_Example-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -109,6 +111,7 @@
 				A1B2C3D4E5F6A7B8C9D0E1F4 /* SwiftUIDemoPage.swift */,
 				607FACD71AFB9204008FA782 /* ViewController.swift */,
 				8447DF59308AFBA800B30B72 /* HTagDemoPage.swift */,
+				8447DF5E308AFBA800B30B72 /* AttributedLabelDemoPage.swift */,
 				8447DF5A308AFBA800B30B72 /* OCDemoViewController.m */,
 				607FACD91AFB9204008FA782 /* Main.storyboard */,
 				607FACDC1AFB9204008FA782 /* Images.xcassets */,
@@ -255,7 +258,7 @@
 			);
 			mainGroup = 607FACC71AFB9204008FA782;
 			packageReferences = (
-				8465EBCB308B5B95009E1C9A /* XCRemoteSwiftPackageReference "ZLRichLabel" */,
+				8465EBCB308B5B95009E1C9A /* XCLocalSwiftPackageReference ".." */,
 			);
 			productRefGroup = 607FACD11AFB9204008FA782 /* Products */;
 			projectDirPath = "";
@@ -360,6 +363,7 @@
 				607FACD81AFB9204008FA782 /* ViewController.swift in Sources */,
 				8447DF5B308AFBA800B30B72 /* OCDemoViewController.m in Sources */,
 				8447DF5C308AFBA800B30B72 /* HTagDemoPage.swift in Sources */,
+				8447DF5D308AFBA800B30B72 /* AttributedLabelDemoPage.swift in Sources */,
 				607FACD61AFB9204008FA782 /* AppDelegate.swift in Sources */,
 				A1B2C3D4E5F6A7B8C9D0E1F1 /* SceneDelegate.swift in Sources */,
 				A1B2C3D4E5F6A7B8C9D0E1F3 /* SwiftUIDemoPage.swift in Sources */,
@@ -647,21 +651,17 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		8465EBCB308B5B95009E1C9A /* XCRemoteSwiftPackageReference "ZLRichLabel" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/FPJack/ZLRichLabel.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.0.0;
-			};
+/* Begin XCLocalSwiftPackageReference section */
+		8465EBCB308B5B95009E1C9A /* XCLocalSwiftPackageReference ".." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ..;
 		};
-/* End XCRemoteSwiftPackageReference section */
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		8465EBCC308B5B95009E1C9A /* ZLRichLabel */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 8465EBCB308B5B95009E1C9A /* XCRemoteSwiftPackageReference "ZLRichLabel" */;
+			package = 8465EBCB308B5B95009E1C9A /* XCLocalSwiftPackageReference ".." */;
 			productName = ZLRichLabel;
 		};
 /* End XCSwiftPackageProductDependency section */

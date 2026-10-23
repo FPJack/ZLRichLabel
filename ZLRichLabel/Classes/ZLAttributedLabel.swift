@@ -972,9 +972,16 @@ open class ZLAttributedLabel: UILabel {
         accessibilityElementsCache = nil
     }
 
+    private var lastLayoutWidth: CGFloat = -1
+
     open override func layoutSubviews() {
         super.layoutSubviews()
         invalidateAccessibilityElements()
+        // 多行时高度取决于宽度：宽度变化后重新计算（Auto Layout 自适应高度）
+        if bounds.width != lastLayoutWidth {
+            lastLayoutWidth = bounds.width
+            if numberOfLines != 1 && preferredMaxLayoutWidth <= 0 { invalidateIntrinsicContentSize() }
+        }
     }
 
     /// 有链接时作为容器（整段文字 + 每个链接），没有链接时与 UILabel 相同
