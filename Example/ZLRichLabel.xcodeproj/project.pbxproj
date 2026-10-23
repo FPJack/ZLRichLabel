@@ -17,6 +17,7 @@
 		8447DF5B308AFBA800B30B72 /* OCDemoViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 8447DF5A308AFBA800B30B72 /* OCDemoViewController.m */; };
 		8447DF5C308AFBA800B30B72 /* HTagDemoPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8447DF59308AFBA800B30B72 /* HTagDemoPage.swift */; };
 		A1B2C3D4E5F6A7B8C9D0E1F1 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* SceneDelegate.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1F3 /* SwiftUIDemoPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F4 /* SwiftUIDemoPage.swift */; };
 		C1807B36E2A194C5B84E2877 /* Pods_ZLRichLabel_Example.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 70741C9BEA80660FB0441EB2 /* Pods_ZLRichLabel_Example.framework */; };
 /* End PBXBuildFile section */
 
@@ -52,6 +53,7 @@
 		92C4077E3E63FD214AE09FE8 /* Pods-ZLRichLabel_Tests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ZLRichLabel_Tests.release.xcconfig"; path = "Target Support Files/Pods-ZLRichLabel_Tests/Pods-ZLRichLabel_Tests.release.xcconfig"; sourceTree = "<group>"; };
 		949E416AAEDFF462F039DB77 /* Pods-ZLRichLabel_Example.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ZLRichLabel_Example.release.xcconfig"; path = "Target Support Files/Pods-ZLRichLabel_Example/Pods-ZLRichLabel_Example.release.xcconfig"; sourceTree = "<group>"; };
 		A1B2C3D4E5F6A7B8C9D0E1F2 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A7B8C9D0E1F4 /* SwiftUIDemoPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftUIDemoPage.swift; sourceTree = "<group>"; };
 		BD2A54BE88416C33209FEC81 /* ZLRichLabel.podspec */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = ZLRichLabel.podspec; path = ../ZLRichLabel.podspec; sourceTree = "<group>"; xcLanguageSpecificationIdentifier = xcode.lang.ruby; };
 		D254E39E8FC2F5E803C27FC1 /* LICENSE */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = LICENSE; path = ../LICENSE; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -102,6 +104,7 @@
 			children = (
 				607FACD51AFB9204008FA782 /* AppDelegate.swift */,
 				A1B2C3D4E5F6A7B8C9D0E1F2 /* SceneDelegate.swift */,
+				A1B2C3D4E5F6A7B8C9D0E1F4 /* SwiftUIDemoPage.swift */,
 				607FACD71AFB9204008FA782 /* ViewController.swift */,
 				8447DF59308AFBA800B30B72 /* HTagDemoPage.swift */,
 				8447DF5A308AFBA800B30B72 /* OCDemoViewController.m */,
@@ -372,6 +375,7 @@
 				8447DF5C308AFBA800B30B72 /* HTagDemoPage.swift in Sources */,
 				607FACD61AFB9204008FA782 /* AppDelegate.swift in Sources */,
 				A1B2C3D4E5F6A7B8C9D0E1F1 /* SceneDelegate.swift in Sources */,
+				A1B2C3D4E5F6A7B8C9D0E1F3 /* SwiftUIDemoPage.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

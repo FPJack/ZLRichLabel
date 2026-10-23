@@ -1130,6 +1130,14 @@ open class ZLRichLabel: TTTAttributedLabel {
         return CGSize(width: UIView.noIntrinsicMetric, height: ceil(size.height))
     }
 
+    /// 尺寸失效时回调（SwiftUI 封装 `ZLRichText` 用它在内容变化后重新计算高度）
+    var intrinsicSizeObserver: (() -> Void)?
+
+    open override func invalidateIntrinsicContentSize() {
+        super.invalidateIntrinsicContentSize()
+        intrinsicSizeObserver?()
+    }
+
     open override var bounds: CGRect {
         didSet { if bounds.size != oldValue.size { setNeedsLayout() } }
     }

@@ -124,9 +124,15 @@ final class HTagDemoPage: UIViewController {
 
         let clear = UIBarButtonItem(barButtonSystemItem: .trash, target: self, action: #selector(clearHistory))
         clear.accessibilityLabel = "清空点击记录"
-        navigationItem.rightBarButtonItem = clear
+        let swiftUI = UIBarButtonItem(title: "SwiftUI", style: .plain, target: self, action: #selector(openSwiftUIDemo))
+        navigationItem.rightBarButtonItems = [clear, swiftUI]
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "OC", style: .plain,
                                                            target: self, action: #selector(openOCDemo))
+    }
+
+    /// SwiftUI 示例页（SwiftUIDemoPage.swift）：ZLRichText 封装
+    @objc private func openSwiftUIDemo() {
+        navigationController?.pushViewController(SwiftUIDemo.makeViewController(), animated: true)
     }
 
     /// Objective-C 示例页（OCDemoViewController.m），通过类名加载，无需桥接头文件

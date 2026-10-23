@@ -1007,3 +1007,133 @@ class DecorationTests: XCTestCase {
         XCTAssertEqual(countPixels(label, where: isDark), 0, "原来的黑色文字不再绘制")
     }
 }
+
+// MARK: - SwiftUI
+
+import SwiftUI
+
+class RichTextSwiftUITests: XCTestCase {
+
+    final class Model: ObservableObject {
+        @Published var text: String
+        init(_ text: String) { self.text = text }
+    }
+
+    struct Host: View {
+        @ObservedObject var model: Model
+        var lineLimit: Int?
+        var configure: ZLRichText.Configure?
+        var body: some View {
+            VStack(alignment: .leading, spacing: 0) {
+                ZLRichText(model.text, configure: configure)
+                    .lineLimit(lineLimit)
+                Spacer(minLength: 0)
+            }
+            .frame(width: 300)
+        }
+    }
+
+    private var window: UIWindow!
+    private let shortText = "Agree to <h1>User Agreement</h1>"
+    private let longText = String(repeating: "A long sentence that wraps onto several lines. ", count: 6)
+
+    override func setUp() {
+        super.setUp()
+        // 必须挂到 windowScene 上：脱离场景的 UIWindow 不显示，SwiftUI 不会提交后续的布局更新
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow()
+        window.frame = CGRect(x: 0, y: 0, width: 300, height: 800)
+    }
+
+    override func tearDown() {
+        ZLRichText._usesLegacySizing = false
+        window.isHidden = true
+        window = nil
+        super.tearDown()
+    }
+
+    private func spin(_ times: Int = 5) {
+        for _ in 0..<times {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            window.rootViewController?.view.layoutIfNeeded()
+        }
+    }
+
+    private func host(_ view: Host) -> ZLTagRichLabel? {
+        window.rootViewController = UIHostingController(rootView: view)
+        window.makeKeyAndVisible()
+        spin()
+        return findLabel(in: window)
+    }
+
+    private func findLabel(in view: UIView) -> ZLTagRichLabel? {
+        if let label = view as? ZLTagRichLabel { return label }
+        for sub in view.subviews { if let found = findLabel(in: sub) { return found } }
+        return nil
+    }
+
+    private func expectedHeight(_ label: ZLRichLabel) -> CGFloat {
+        return ceil(label.sizeThatFits(CGSize(width: 300, height: CGFloat.greatestFiniteMagnitude)).height)
+    }
+
+    private func checkAutoHeight(file: StaticString = #filePath, line: UInt = #line) {
+        let model = Model(shortText)
+        guard let label = host(Host(model: model)) else { return XCTFail("no label", file: file, line: line) }
+        XCTAssertEqual(label.attributedText.string, "Agree to User Agreement", file: file, line: line)
+        let oneLine = label.bounds.height
+        XCTAssertGreaterThan(oneLine, 10, file: file, line: line)
+        XCTAssertEqual(oneLine, expectedHeight(label), accuracy: 1, file: file, line: line)
+
+        model.text = longText
+        spin()
+        XCTAssertGreaterThan(label.bounds.height, oneLine * 3, "文字变长后高度增加", file: file, line: line)
+        XCTAssertEqual(label.bounds.height, expectedHeight(label), accuracy: 1, file: file, line: line)
+    }
+
+    func testAutoHeight() {
+        checkAutoHeight()
+    }
+
+    func testLegacyAutoHeight() {
+        ZLRichText._usesLegacySizing = true
+        checkAutoHeight()
+    }
+
+    func testInternalChangeUpdatesHeight() {
+        for legacy in [false, true] {
+            ZLRichText._usesLegacySizing = legacy
+            let model = Model(longText)
+            let host = Host(model: model, configure: { label in
+                label.numberOfLines = 2
+                label.expandToken = NSAttributedString(string: "… 全文")
+            })
+            guard let label = self.host(host) else { return XCTFail("no label") }
+            let collapsed = label.bounds.height
+            XCTAssertTrue(label.isTruncated, "legacy=\(legacy)")
+
+            label.toggleExpanded()     // 只改了 label 内部状态，SwiftUI 不知道
+            spin()
+            XCTAssertGreaterThan(label.bounds.height, collapsed * 2, "展开后 SwiftUI 重新计算了高度 legacy=\(legacy)")
+            XCTAssertEqual(label.bounds.height, expectedHeight(label), accuracy: 1, "legacy=\(legacy)")
+        }
+    }
+
+    func testLineLimitAndConfigureRunsOnce() {
+        var configureCalls = 0
+        let model = Model(longText)
+        let host = Host(model: model, lineLimit: 1, configure: { label in
+            configureCalls += 1
+            try? label.addRule(name: "agree", pattern: "sentence") { ctx in
+                ctx.addAttributes([.foregroundColor: UIColor.red])
+            }
+        })
+        guard let label = self.host(host) else { return XCTFail("no label") }
+        XCTAssertEqual(label.numberOfLines, 1)
+        XCTAssertEqual(label.bounds.height, expectedHeight(label), accuracy: 1)
+
+        model.text = longText + " more sentence"
+        spin()
+        XCTAssertEqual(configureCalls, 1, "configure 只执行一次")
+        XCTAssertEqual(label.rules.count, 1, "规则没有重复添加")
+    }
+}

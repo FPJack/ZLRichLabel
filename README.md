@@ -48,6 +48,7 @@ Swift 与 Objective-C 均可使用，基于 [TTTAttributedLabel](https://github.
 - 渲染缓存 + 排版缓存：改样式 / 追加文字时只重新处理变化的部分
 - RTL：阿拉伯语 / 希伯来语等从右到左文本自动右对齐，支持双向混排
 - 深色模式自动重新渲染；可选支持 Dynamic Type（系统文字大小）
+- SwiftUI：`ZLRichText` 封装，高度自适应（支持 `.lineLimit`、展开 / 收起等内部变化）
 - Objective-C 可用
 
 ## 环境要求
@@ -71,6 +72,7 @@ ZLRichLabel/Classes/
 ├── ZLRichLabel.swift      基类：规则解析、渲染、内嵌 View、布局、截断、RTL、手势
 ├── ZLRichLabel+Selection.swift  选中复制：选中范围、拖柄、菜单、展示文字与原文的对应
 ├── ZLRichLabel+Decoration.swift 胶囊背景 / 渐变文字的属性与绘制
+├── ZLRichText.swift      SwiftUI 封装（UIViewRepresentable），高度自适应
 ├── ZLTagParser.swift      通用标签解析：任意标签名、属性、嵌套、自闭合、容错
 └── ZLTagRichLabel.swift   标签子类、HTagInfo、HTagParser
 ```
@@ -654,6 +656,55 @@ final class MentionLabel: ZLRichLabel {
 - 只影响**渲染**的配置变化 → `setNeedsRebuild()`
 - 内置规则的 handler 中用 `[weak self]`，避免 label ↔ rule 循环引用
 
+## SwiftUI
+
+`ZLRichText` 用 `UIViewRepresentable` 包了一层 `ZLTagRichLabel`，高度随内容自适应：
+
+```swift
+import SwiftUI
+import ZLRichLabel
+
+struct AgreementView: View {
+    @State private var isExpanded = false
+
+    var body: some View {
+        ZLRichText("我已阅读并同意<h1>《用户协议》</h1>和 #话题#", configure: { label in
+            // 只在创建时执行一次：加规则、设样式和回调
+            label.style = [.font: UIFont.systemFont(ofSize: 15)]
+            label.tagStyles = ["h1": [.foregroundColor: UIColor.systemBlue]]
+            label.onTagTap = { info in print(info.text) }
+            try? label.addRule(name: "topic", pattern: "#[^#\\s]+#") { ctx in
+                ctx.addAttributes([.zlBackground: ZLTextBackground.capsule(.systemPurple)])
+            }
+            label.numberOfLines = 2
+            label.expandToken = NSAttributedString(string: "… 全文")
+            label.onExpandChanged = { isExpanded = $0 }     // label → @State
+        }, update: { label in
+            // 每次 SwiftUI 刷新都会执行：同步会变化的状态
+            if label.isExpanded != isExpanded { label.isExpanded = isExpanded }   // @State → label
+        })
+    }
+}
+```
+
+| 参数 / 修饰符 | 说明 |
+| --- | --- |
+| `text` | 原始文本，变化时重新解析 |
+| `configure` | 创建 label 时执行**一次**：添加规则、设置样式与回调。规则请在这里添加，避免每次刷新重复添加 |
+| `update` | 每次 SwiftUI 刷新时执行（在一次批量更新中，最后才设置 `text`），用于同步 `@State` 等会变化的配置 |
+| `.lineLimit(_:)` | 同步到 `numberOfLines`；只在变化时应用，不会覆盖 `configure` 里设置的行数 |
+
+高度自适应：
+
+- iOS 16+：通过 `sizeThatFits(_:uiView:context:)` 按 SwiftUI 提供的宽度计算，宽度不超过可用宽度（短文字不会撑满）。
+- iOS 13 ~ 15：用 `GeometryReader` 读取宽度后测量高度，占满可用宽度。
+- label 内部的变化（点击「全文」展开、自定义 View 尺寸变化、Dynamic Type）也会重新计算高度，可以直接放在 `ScrollView` / `List` 中。
+
+说明：
+
+- `configure` 里的回调是在创建时捕获的。修改外部状态请通过 `@State` / `@Binding` / `ObservableObject` 等引用语义的方式，不要依赖创建后才变化的普通值。
+- 需要直接操作 label 时（如 `toggleExpanded()`），在 `configure` 里把它保存到引用类型中，或者通过 `update` 同步状态。
+
 ## Objective-C
 
 所有公开类型都是 `NSObject` 子类或 `@objc` 枚举，`@import ZLRichLabel;` 即可使用。
@@ -718,7 +769,7 @@ pod install
 open ZLRichLabel.xcworkspace
 ```
 
-示例 App 包含 Swift（`HTagDemoPage.swift`）和 Objective-C（`OCDemoViewController.m`，导航栏左上角「OC」进入）两个版本，内容一致：
+示例 App 包含 Swift（`HTagDemoPage.swift`）和 Objective-C（`OCDemoViewController.m`，导航栏左上角「OC」进入）两个版本，内容一致；SwiftUI 示例（`SwiftUIDemoPage.swift`）从导航栏右上角「SwiftUI」进入，演示基础用法与点击、输入时高度实时变化、展开 / 收起与 `@State` 同步、`.lineLimit`、规则 + 胶囊 + 渐变、`List` 中自适应行高：
 
 | 用例 | 内容 |
 | --- | --- |
