@@ -677,11 +677,13 @@ final class HTagDemoPage: UIViewController {
         }
     }
 
-    /// 直接修改 View 的 frame 尺寸：label 下次布局时自动检测并重新排版，无需额外调用
+    /// 直接修改 View 的 frame 尺寸，再调用 zl_setNeedsRichLabelLayout() 让 label 立即按新尺寸重新排版
+    /// （不调用时要等 label 下次布局才会检测到）
     @objc private func growBox21(_ gesture: UITapGestureRecognizer) {
         guard let box = gesture.view else { return }
         boxWidth21 = boxWidth21 >= 120 ? 24 : boxWidth21 + 32
         box.frame.size.width = boxWidth21
+        box.zl_setNeedsRichLabelLayout()
     }
 
     /// 自动尺寸（size == .zero）的 View 内容变化：调用 zl_setNeedsRichLabelLayout() 重新测量

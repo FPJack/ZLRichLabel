@@ -1462,6 +1462,33 @@ open class ZLRichLabel: TTTAttributedLabel {
         copySelection(raw: true)
     }
 
+    /// TTTAttributedLabel 在点位有链接时直接返回 label 自身，内嵌的自定义 View（自带手势 / UIControl）收不到触摸。
+    /// 这里先让「自己处理交互」的子 View 命中；没有自己交互的 View（以及只带内部点击的 View）仍交给链接处理
+    open override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if isUserInteractionEnabled, !isHidden, alpha >= 0.01, self.point(inside: point, with: event) {
+            for subview in subviews.reversed()
+            where !subview.isHidden && subview.isUserInteractionEnabled && subview.alpha >= 0.01 {
+                guard let hit = subview.hitTest(convert(point, to: subview), with: event),
+                      handlesOwnTouches(hit) else { continue }
+                return hit
+            }
+        }
+        return super.hitTest(point, with: event)
+    }
+
+    /// 从命中的 View 向上到 label（不含），是否有 View 自己处理触摸（UIControl 或有外部添加的手势）
+    private func handlesOwnTouches(_ view: UIView) -> Bool {
+        var current: UIView? = view
+        while let v = current, v !== self {
+            if v is UIControl { return true }
+            if v.gestureRecognizers?.contains(where: { $0.isEnabled && !($0 is TagTapGestureRecognizer) }) == true {
+                return true
+            }
+            current = v.superview
+        }
+        return false
+    }
+
     /// 选中时拖柄在 bounds 外，也要能接收触摸
     open override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         if super.point(inside: point, with: event) { return true }

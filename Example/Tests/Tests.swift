@@ -1348,3 +1348,48 @@ class TouchAreaAndThresholdTests: XCTestCase {
         XCTAssertEqual(label.numberOfLines, 3)
     }
 }
+
+/// 用例 21：标签可点击（onTagTap）时，内嵌 View 自带的手势 / UIControl 仍能收到触摸
+class AttachmentHitTestTests: XCTestCase {
+
+    private func makeLabel(widget: @escaping () -> ZLRichWidget) -> ZLTagRichLabel {
+        let label = ZLTagRichLabel(frame: CGRect(x: 0, y: 0, width: 260, height: 0))
+        label.numberOfLines = 0
+        label.update { v in
+            v.style = [.font: UIFont.systemFont(ofSize: 15)]
+            v.onTagTap = { _ in }
+            v.tagWidgetBuilder = { info, _ in info.name == "h1" ? widget() : nil }
+            v.text = "Tap the box <h1>box</h1> to resize it, tap <h2>like</h2> to add likes."
+        }
+        label.frame.size.height = label.sizeThatFits(CGSize(width: 260, height: CGFloat.greatestFiniteMagnitude)).height
+        label.layoutIfNeeded()
+        return label
+    }
+
+    private func center(of view: UIView, in label: UIView) -> CGPoint {
+        return view.convert(CGPoint(x: view.bounds.midX, y: view.bounds.midY), to: label)
+    }
+
+    func testViewWithOwnGestureReceivesTouch() {
+        let box = UIView()
+        box.addGestureRecognizer(UITapGestureRecognizer())
+        let label = makeLabel { ZLRichWidget(view: box, size: CGSize(width: 24, height: 16), tappable: false) }
+        XCTAssertFalse(box.isHidden)
+        let p = center(of: box, in: label)
+        XCTAssertNotNil(label.link(at: p), "前提：View 所在位置是标签链接")
+        XCTAssertTrue(label.hitTest(p, with: nil) === box)
+    }
+
+    func testControlReceivesTouch() {
+        let button = UIButton(type: .system)
+        let label = makeLabel { ZLRichWidget(view: button, size: CGSize(width: 30, height: 16), tappable: false) }
+        XCTAssertTrue(label.hitTest(center(of: button, in: label), with: nil) === button)
+    }
+
+    func testPlainViewStillHandledByLink() {
+        let icon = UIView()
+        let label = makeLabel { ZLRichWidget(view: icon, size: CGSize(width: 16, height: 16)) }
+        // 没有自己的交互（tappable 只加内部点击）：仍由 label 处理链接点击和按下高亮
+        XCTAssertTrue(label.hitTest(center(of: icon, in: label), with: nil) === label)
+    }
+}
