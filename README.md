@@ -4,7 +4,20 @@
 [![License](https://img.shields.io/cocoapods/l/ZLRichLabel.svg?style=flat)](https://cocoapods.org/pods/ZLRichLabel)
 [![Platform](https://img.shields.io/cocoapods/p/ZLRichLabel.svg?style=flat)](https://cocoapods.org/pods/ZLRichLabel)
 
-基于 [TTTAttributedLabel](https://github.com/TTTAttributedLabel/TTTAttributedLabel) 的富文本 Label，分为两层：
+**ZLRichLabel 是一个 iOS 富文本 Label：用正则规则（或内置的 `<h1>…</h1>` 标签）从普通字符串里识别出关键内容，再由你决定每段内容怎么显示、点了做什么。**
+
+一行带标记的字符串，就能渲染出带样式、图片、自定义 View、可点击、支持按下高亮的富文本，不需要手动拼 `NSAttributedString`、计算点击区域或摆放子 View。
+
+适用场景：
+
+- **协议 / 隐私政策勾选文案**：`我已阅读并同意<h1>用户协议</h1>和<h2>隐私政策</h2>`，不同标签不同颜色、不同跳转
+- **社交内容**：@提及、#话题#、链接识别与点击，链接替换为「🔗网页链接」
+- **表情与模板**：`[smile]` 替换为图片，`{{name}}` 替换为变量值
+- **行内控件**：文字中嵌入按钮、徽章、勾选框、计数器等任意 `UIView`，尺寸变化后自动重新排版
+- **多语言**：阿拉伯语 / 希伯来语等 RTL 文本与双向混排
+- **轻量标记**：简易 Markdown（加粗、删除线、行内代码）等自定义语法
+
+Swift 与 Objective-C 均可使用，基于 [TTTAttributedLabel](https://github.com/TTTAttributedLabel/TTTAttributedLabel)，分为两层：
 
 | 类 | 作用 |
 | --- | --- |
