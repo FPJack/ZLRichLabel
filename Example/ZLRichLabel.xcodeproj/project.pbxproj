@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 46;
+	objectVersion = 54;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -16,6 +16,7 @@
 		607FACEC1AFB9204008FA782 /* Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 607FACEB1AFB9204008FA782 /* Tests.swift */; };
 		8447DF5B308AFBA800B30B72 /* OCDemoViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 8447DF5A308AFBA800B30B72 /* OCDemoViewController.m */; };
 		8447DF5C308AFBA800B30B72 /* HTagDemoPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8447DF59308AFBA800B30B72 /* HTagDemoPage.swift */; };
+		8465EBCD308B5B95009E1C9A /* ZLRichLabel in Frameworks */ = {isa = PBXBuildFile; productRef = 8465EBCC308B5B95009E1C9A /* ZLRichLabel */; };
 		A1B2C3D4E5F6A7B8C9D0E1F1 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* SceneDelegate.swift */; };
 		A1B2C3D4E5F6A7B8C9D0E1F3 /* SwiftUIDemoPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F4 /* SwiftUIDemoPage.swift */; };
 		C1807B36E2A194C5B84E2877 /* Pods_ZLRichLabel_Example.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 70741C9BEA80660FB0441EB2 /* Pods_ZLRichLabel_Example.framework */; };
@@ -64,6 +65,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C1807B36E2A194C5B84E2877 /* Pods_ZLRichLabel_Example.framework in Frameworks */,
+				8465EBCD308B5B95009E1C9A /* ZLRichLabel in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -184,13 +186,15 @@
 				607FACCC1AFB9204008FA782 /* Sources */,
 				607FACCD1AFB9204008FA782 /* Frameworks */,
 				607FACCE1AFB9204008FA782 /* Resources */,
-				4AA32BA7296043B8118FFF85 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			name = ZLRichLabel_Example;
+			packageProductDependencies = (
+				8465EBCC308B5B95009E1C9A /* ZLRichLabel */,
+			);
 			productName = ZLRichLabel;
 			productReference = 607FACD01AFB9204008FA782 /* ZLRichLabel_Example.app */;
 			productType = "com.apple.product-type.application";
@@ -250,6 +254,9 @@
 				Base,
 			);
 			mainGroup = 607FACC71AFB9204008FA782;
+			packageReferences = (
+				8465EBCB308B5B95009E1C9A /* XCRemoteSwiftPackageReference "ZLRichLabel" */,
+			);
 			productRefGroup = 607FACD11AFB9204008FA782 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -323,24 +330,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
-			showEnvVarsInLog = 0;
-		};
-		4AA32BA7296043B8118FFF85 /* [CP] Embed Pods Frameworks */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-ZLRichLabel_Example/Pods-ZLRichLabel_Example-frameworks.sh",
-				"${BUILT_PRODUCTS_DIR}/ZLRichLabel/ZLRichLabel.framework",
-			);
-			name = "[CP] Embed Pods Frameworks";
-			outputPaths = (
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/ZLRichLabel.framework",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-ZLRichLabel_Example/Pods-ZLRichLabel_Example-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 		DF9DB0AFE540A7B26332B27E /* [CP] Embed Pods Frameworks */ = {
@@ -509,7 +498,8 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
-				SWIFT_OPTIMIZATION_LEVEL = "-Owholemodule";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
@@ -524,7 +514,10 @@
 				DEVELOPMENT_TEAM = "";
 				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = 6ZA44MJL83;
 				INFOPLIST_FILE = ZLRichLabel/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
 				MODULE_NAME = ExampleApp;
 				PRODUCT_BUNDLE_IDENTIFIER = com.wws.richtext;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -547,7 +540,10 @@
 				DEVELOPMENT_TEAM = "";
 				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = 6ZA44MJL83;
 				INFOPLIST_FILE = ZLRichLabel/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
 				MODULE_NAME = ExampleApp;
 				PRODUCT_BUNDLE_IDENTIFIER = com.wws.richtext;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -575,13 +571,18 @@
 					"$(inherited)",
 				);
 				INFOPLIST_FILE = Tests/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.wws.richtext;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "glcoalme-dev-all";
 				SWIFT_SWIFT3_OBJC_INFERENCE = Default;
 				SWIFT_VERSION = 5.0;
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ZLRichLabel_Example.app/ZLRichLabel_Example";
 			};
 			name = Debug;
@@ -598,13 +599,18 @@
 					"$(inherited)",
 				);
 				INFOPLIST_FILE = Tests/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.wws.richtext;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "glcoalme-dev-all";
 				SWIFT_SWIFT3_OBJC_INFERENCE = Default;
 				SWIFT_VERSION = 5.0;
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ZLRichLabel_Example.app/ZLRichLabel_Example";
 			};
 			name = Release;
@@ -640,6 +646,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		8465EBCB308B5B95009E1C9A /* XCRemoteSwiftPackageReference "ZLRichLabel" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/FPJack/ZLRichLabel.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		8465EBCC308B5B95009E1C9A /* ZLRichLabel */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8465EBCB308B5B95009E1C9A /* XCRemoteSwiftPackageReference "ZLRichLabel" */;
+			productName = ZLRichLabel;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 607FACC81AFB9204008FA782 /* Project object */;
 }

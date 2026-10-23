@@ -4,24 +4,17 @@ PODS:
   - FBSnapshotTestCase/Core (2.1.4)
   - FBSnapshotTestCase/SwiftSupport (2.1.4):
     - FBSnapshotTestCase/Core
-  - ZLRichLabel (1.2.0)
 
 DEPENDENCIES:
   - FBSnapshotTestCase (~> 2.1.4)
-  - ZLRichLabel (from `../`)
 
 SPEC REPOS:
   trunk:
     - FBSnapshotTestCase
 
-EXTERNAL SOURCES:
-  ZLRichLabel:
-    :path: "../"
-
 SPEC CHECKSUMS:
   FBSnapshotTestCase: 094f9f314decbabe373b87cc339bea235a63e07a
-  ZLRichLabel: 85c4029662a5d156e845da2f21d2ac01cea1fd54
 
-PODFILE CHECKSUM: 7c5fe7c59d0a39e42ad959735fea0bc479a3961c
+PODFILE CHECKSUM: 3ed137bc739b305aaa4fb4471bcb502876d361fb
 
 COCOAPODS: 1.16.2

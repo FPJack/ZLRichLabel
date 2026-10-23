@@ -1,6 +1,0 @@
-framework module ZLRichLabel {
-  umbrella header "ZLRichLabel-umbrella.h"
-
-  export *
-  module * { export * }
-}
