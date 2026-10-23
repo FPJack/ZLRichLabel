@@ -196,6 +196,38 @@ open class ZLRichLabel: TTTAttributedLabel {
     /// 收起时的行数（即设置的 `numberOfLines`，展开时也不变）
     public var collapsedNumberOfLines: Int { return super.numberOfLines }
 
+    /// 超过多少行才折叠，默认 0（等于 `numberOfLines`：超过 `numberOfLines` 行就折叠）。
+    /// 例如 `numberOfLines = 3`、`collapseThreshold = 5`：内容不超过 5 行时完整显示（没有「展开」按钮），
+    /// 超过 5 行时才折叠为 3 行并显示「展开」。小于等于 `numberOfLines` 时不生效。按当前宽度计算行数
+    open var collapseThreshold: Int = 0 {
+        didSet {
+            guard collapseThreshold != oldValue else { return }
+            invalidateIntrinsicContentSize()
+            setNeedsLayout()
+            setNeedsDisplay()
+        }
+    }
+
+    /// 某个文字宽度下实际使用的行数：展开时为 0；设置了 `collapseThreshold` 且内容不超过它时为 0（完整显示）
+    func effectiveNumberOfLines(forTextWidth width: CGFloat) -> Int {
+        if isExpanded { return 0 }
+        let collapsed = super.numberOfLines
+        guard collapsed > 0, collapseThreshold > collapsed, width > 0,
+              let attr = attributedText, attr.length > 0 else { return collapsed }
+        return lineCount(of: attr, width: width) <= collapseThreshold ? 0 : collapsed
+    }
+
+    /// 内容在某个宽度下的总行数（按排版缓存）
+    private func lineCount(of attr: NSAttributedString, width: CGFloat) -> Int {
+        let cache = layoutCache(for: attr)
+        if let count = cache.lineCounts[width] { return count }
+        let path = CGPath(rect: CGRect(x: 0, y: 0, width: width, height: 100000), transform: nil)
+        let frame = CTFramesetterCreateFrame(cache.framesetter, CFRange(location: 0, length: 0), path, nil)
+        let count = (CTFrameGetLines(frame) as? [CTLine])?.count ?? 0
+        cache.lineCounts[width] = count
+        return count
+    }
+
     /// 当前内容是否被截断（最近一次布局的结果）
     public private(set) var isTruncated: Bool = false
 
@@ -457,6 +489,8 @@ open class ZLRichLabel: TTTAttributedLabel {
         let text: NSAttributedString
         let framesetter: CTFramesetter
         var sizes: [SizeKey: CGSize] = [:]
+        /// 宽度 → 总行数（collapseThreshold 用）
+        var lineCounts: [CGFloat: Int] = [:]
         var frameRect: CGRect?
         var frameLines: [CTLine] = []
         var frameOrigins: [CGPoint] = []
@@ -1095,6 +1129,8 @@ open class ZLRichLabel: TTTAttributedLabel {
         if width <= 0 { width = maxValue }
 
         let cache = layoutCache(for: attr)
+        // 按要计算的宽度决定行数（collapseThreshold 与宽度有关，不能直接用当前 bounds 下的 numberOfLines）
+        let numberOfLines = effectiveNumberOfLines(forTextWidth: width)
         let key = SizeKey(width: width, numberOfLines: numberOfLines)
         if let cached = cache.sizes[key] {
             statistics.sizeCacheHits += 1
@@ -1143,9 +1179,10 @@ open class ZLRichLabel: TTTAttributedLabel {
         didSet { if bounds.size != oldValue.size { setNeedsLayout() } }
     }
 
-    /// 展开时读取为 0（显示全部）；设置的值保存为收起时的行数（`collapsedNumberOfLines`）
+    /// 展开时读取为 0（显示全部）；设置的值保存为收起时的行数（`collapsedNumberOfLines`）。
+    /// 设置了 `collapseThreshold` 且内容（按当前宽度）不超过它时也读取为 0
     open override var numberOfLines: Int {
-        get { return isExpanded ? 0 : super.numberOfLines }
+        get { return effectiveNumberOfLines(forTextWidth: bounds.width - textInsets.left - textInsets.right) }
         set {
             super.numberOfLines = newValue
             invalidateIntrinsicContentSize()
@@ -1452,7 +1489,9 @@ open class ZLRichLabel: TTTAttributedLabel {
     }
 
     private func displayMatch(at point: CGPoint) -> (range: NSRange, rendered: RenderedMatch)? {
-        if let item = displayMatch(atCharacter: characterIndex(at: point)) { return item }
+        let index = characterIndex(at: point)
+        // 按在文字上时以这个字为准：不再向四周扩大查找，避免按在普通文字上却命中了上下行的链接
+        guard index == NSNotFound else { return displayMatch(atCharacter: index) }
         guard extendsLinkTouchArea else { return nil }
         // 与 TTTAttributedLabel.linkAtPoint 一致：由近到远在 8 个方向上查找可交互的命中
         for radius: CGFloat in [2.5, 5, 7.5, 12.5, 15] {
@@ -1469,6 +1508,15 @@ open class ZLRichLabel: TTTAttributedLabel {
             }
         }
         return nil
+    }
+
+    /// TTTAttributedLabel 在手指下的字符不是链接时，会向四周最远 15pt 查找链接（extendsLinkTouchArea），
+    /// 按在普通文字上也可能高亮 / 触发上下行的链接。这里改为只在没有按在文字上（行间距、行尾空白）时才扩大查找
+    open override func link(at point: CGPoint) -> TTTAttributedLabelLink! {
+        guard extendsLinkTouchArea, characterIndex(at: point) != NSNotFound else { return super.link(at: point) }
+        extendsLinkTouchArea = false
+        defer { extendsLinkTouchArea = true }
+        return super.link(at: point)
     }
 
     /// 某个字符所在命中在展示文字中的范围

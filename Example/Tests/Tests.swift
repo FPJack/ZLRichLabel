@@ -1225,3 +1225,126 @@ class ObjCUpdateTagTests: XCTestCase {
         XCTAssertEqual(label.tags.map { $0.name }, ["h1"])
     }
 }
+
+// MARK: - 修复：扩大热区不覆盖普通文字 / collapseThreshold
+
+class TouchAreaAndThresholdTests: XCTestCase {
+
+    /// 与用例 25 一致：行间距 10，标签和 @alice 在前一行，普通文字（❤️）紧挨在下一行
+    private func makeTouchLabel() -> ZLTagRichLabel {
+        let label = ZLTagRichLabel(frame: CGRect(x: 0, y: 0, width: 220, height: 0))
+        label.numberOfLines = 0
+        label.update { v in
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineSpacing = 10
+            v.style = [.font: UIFont.systemFont(ofSize: 15), .paragraphStyle: paragraph]
+            v.extendsLinkTouchArea = true
+            v.onTagTap = { _ in }
+            try? v.addRule(name: "mention", pattern: "@\\w+") { ctx in ctx.onTap = { _ in } }
+            v.text = "Press <h1>User Agreement</h1> or @alice for menus, double tap to like ❤️ plain words here."
+        }
+        let size = label.sizeThatFits(CGSize(width: 220, height: CGFloat.greatestFiniteMagnitude))
+        label.frame.size.height = size.height
+        label.layoutIfNeeded()
+        return label
+    }
+
+    func testPlainTextNeverResolvesToNearbyLink() {
+        let label = makeTouchLabel()
+        let display = label.attributedText.string as NSString
+        var plainChecked = 0
+        var gapExtended = 0
+        for y in stride(from: CGFloat(0.5), to: label.bounds.height, by: 1) {
+            for x in stride(from: CGFloat(0.5), to: label.bounds.width, by: 2) {
+                let p = CGPoint(x: x, y: y)
+                let index = label.characterIndex(at: p)
+                if index != NSNotFound {
+                    // 按在文字上：只有这个字本身属于链接 / 命中时才返回
+                    let ownMatch = ((label.links as? [NSTextCheckingResult]) ?? []).contains { NSLocationInRange(index, $0.range) }
+                    if !ownMatch {
+                        plainChecked += 1
+                        XCTAssertNil(label.link(at: p), "普通文字「\(display.substring(with: NSRange(location: index, length: 1)))」不应命中附近的链接 \(p)")
+                        XCTAssertNil(label.match(at: p), "普通文字不应命中附近的规则 \(p)")
+                    }
+                } else if label.match(at: p) != nil {
+                    gapExtended += 1
+                }
+            }
+        }
+        XCTAssertGreaterThan(plainChecked, 100)
+        XCTAssertGreaterThan(gapExtended, 0, "行间距 / 空白处仍然会扩大查找")
+    }
+
+    // MARK: collapseThreshold
+
+    private let fourLines = "第一行文字内容比较长一些。第二行文字内容比较长一些。第三行文字内容比较长一些。第四行文字内容比较长。"
+
+    private func makeExpandLabel(width: CGFloat, threshold: Int) -> ZLRichLabel {
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: width, height: 0))
+        label.update { v in
+            v.style = [.font: UIFont.systemFont(ofSize: 15)]
+            v.numberOfLines = 3
+            v.collapseThreshold = threshold
+            v.expandToken = NSAttributedString(string: "… 全文")
+            v.text = fourLines
+        }
+        let size = label.sizeThatFits(CGSize(width: width, height: CGFloat.greatestFiniteMagnitude))
+        label.frame.size.height = size.height
+        label.layoutIfNeeded()
+        return label
+    }
+
+    private func totalLines(_ label: ZLRichLabel, width: CGFloat) -> Int {
+        let framesetter = CTFramesetterCreateWithAttributedString(label.attributedText as CFAttributedString)
+        let path = CGPath(rect: CGRect(x: 0, y: 0, width: width, height: 10000), transform: nil)
+        let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0), path, nil)
+        return (CTFrameGetLines(frame) as? [CTLine])?.count ?? 0
+    }
+
+    func testThresholdShowsAllWhenWithinLimit() {
+        // 宽度 200 时大约 4 ~ 6 行：阈值设为实际行数，不折叠
+        let probe = makeExpandLabel(width: 200, threshold: 0)
+        let lines = totalLines(probe, width: 200)
+        XCTAssertGreaterThan(lines, 3, "测试文字需要超过 3 行")
+        XCTAssertTrue(probe.isTruncated, "默认（阈值 0）超过 3 行就折叠")
+
+        let within = makeExpandLabel(width: 200, threshold: lines)
+        XCTAssertFalse(within.isTruncated, "不超过阈值：完整显示")
+        XCTAssertEqual(within.expandTokenRect, .zero, "不显示「全文」")
+        XCTAssertEqual(within.numberOfLines, 0)
+        XCTAssertEqual(within.collapsedNumberOfLines, 3, "设置的行数保留")
+        XCTAssertGreaterThan(within.bounds.height, probe.bounds.height, "完整显示比折叠后高")
+
+        let exceeded = makeExpandLabel(width: 200, threshold: lines - 1)
+        XCTAssertTrue(exceeded.isTruncated, "超过阈值：折叠")
+        XCTAssertEqual(exceeded.numberOfLines, 3)
+        XCTAssertFalse(exceeded.expandTokenRect.isEmpty, "显示「全文」")
+        XCTAssertEqual(exceeded.bounds.height, probe.bounds.height, accuracy: 0.5)
+    }
+
+    func testThresholdDependsOnWidth() {
+        let label = makeExpandLabel(width: 200, threshold: 0)
+        let narrowLines = totalLines(label, width: 200)
+        let wideLines = totalLines(label, width: 400)
+        XCTAssertGreaterThan(narrowLines, wideLines)
+        label.collapseThreshold = wideLines   // 宽 400 时不超过阈值，宽 200 时超过
+
+        let narrow = label.sizeThatFits(CGSize(width: 200, height: CGFloat.greatestFiniteMagnitude)).height
+        let wide = label.sizeThatFits(CGSize(width: 400, height: CGFloat.greatestFiniteMagnitude)).height
+        let font = UIFont.systemFont(ofSize: 15)
+        XCTAssertEqual(Int((narrow / font.lineHeight).rounded()), 3, "窄：折叠为 3 行")
+        XCTAssertEqual(Int((wide / font.lineHeight).rounded()), wideLines, "宽：完整显示")
+    }
+
+    func testExpandStillWorksWithThreshold() {
+        let probe = makeExpandLabel(width: 200, threshold: 0)
+        let lines = totalLines(probe, width: 200)
+        let label = makeExpandLabel(width: 200, threshold: lines - 1)
+        let collapsed = label.bounds.height
+        label.toggleExpanded()
+        let size = label.sizeThatFits(CGSize(width: 200, height: CGFloat.greatestFiniteMagnitude))
+        XCTAssertGreaterThan(size.height, collapsed)
+        label.toggleExpanded()
+        XCTAssertEqual(label.numberOfLines, 3)
+    }
+}

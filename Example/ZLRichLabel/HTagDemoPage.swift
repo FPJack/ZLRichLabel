@@ -1073,9 +1073,17 @@ final class HTagDemoPage: UIViewController {
             ("24. 展开 / 收起（收起时 3 行）", long),
             ("24b. 内容不足 3 行：不显示「全文」", "<h1>短内容</h1> 不会被截断，也不显示按钮。"),
         ]
-        for (title, text) in cases {
+        // collapseThreshold：超过阈值才折叠
+        let fourLines = "<h1>collapseThreshold = 5</h1>：numberOfLines 仍为 3，但内容不超过 5 行时完整显示、"
+            + "不出现「全文」，避免只折叠掉一两行。这段文字在手机宽度下大约 4 行，所以完整显示。"
+        let thresholdCases: [(String, String, Int)] = cases.map { ($0.0, $0.1, 0) } + [
+            ("24c. collapseThreshold = 5：不超过 5 行完整显示", fourLines, 5),
+            ("24d. collapseThreshold = 5：超过 5 行才折叠为 3 行", long + long, 5),
+        ]
+        for (title, text, threshold) in thresholdCases {
             addCase(title, source: text) { v in
                 v.numberOfLines = 3
+                v.collapseThreshold = threshold
                 v.tagStyle = [.foregroundColor: UIColor.mBlue]
                 v.tagHighlightStyle = [.backgroundColor: UIColor(white: 0, alpha: 0.08)]
                 let tokenStyle: ZLTextStyle = [.foregroundColor: UIColor.mDeepOrange,
