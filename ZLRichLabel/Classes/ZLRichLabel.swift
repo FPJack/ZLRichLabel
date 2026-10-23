@@ -160,15 +160,48 @@ open class ZLRichLabel: TTTAttributedLabel {
     private final class Attachment {
         let id: Int
         let view: UIView
-        let size: CGSize
-        let ascent: CGFloat
-        let descent: CGFloat
-        init(id: Int, view: UIView, size: CGSize, ascent: CGFloat, descent: CGFloat) {
+        let alignment: HTagWidgetAlignment
+        /// 所在位置的字体（用于按对齐方式计算 ascent / descent）
+        let font: UIFont
+        /// `HTagWidget.size == .zero`：尺寸由 View 自身计算，内容变化后可重新测量
+        let autoSize: Bool
+        private(set) var size: CGSize = .zero
+        private(set) var ascent: CGFloat = 0
+        private(set) var descent: CGFloat = 0
+        /// 最近一次布局时设置给 View 的尺寸，用于检测外部修改了 View 的尺寸
+        var appliedSize: CGSize?
+
+        init(id: Int, view: UIView, alignment: HTagWidgetAlignment, font: UIFont, autoSize: Bool, size: CGSize) {
             self.id = id
             self.view = view
+            self.alignment = alignment
+            self.font = font
+            self.autoSize = autoSize
+            update(size: size)
+        }
+
+        /// 更新尺寸并按对齐方式重新计算 ascent / descent
+        func update(size: CGSize) {
             self.size = size
-            self.ascent = ascent
-            self.descent = descent
+            let height = size.height
+            switch alignment {
+            case .baseline, .aboveBaseline:
+                ascent = height
+                descent = 0
+            case .belowBaseline:
+                ascent = 0
+                descent = height
+            case .top:
+                ascent = font.ascender
+                descent = height - font.ascender
+            case .bottom:
+                descent = -font.descender
+                ascent = height - descent
+            case .middle:
+                let mid = (font.ascender + font.descender) / 2
+                ascent = height / 2 + mid
+                descent = height / 2 - mid
+            }
         }
     }
 
@@ -380,46 +413,25 @@ open class ZLRichLabel: TTTAttributedLabel {
         nextAttachmentId = 0
     }
 
+    /// 计算 View 的尺寸：systemLayoutSizeFitting → sizeThatFits → bounds
+    private static func measure(_ view: UIView) -> CGSize {
+        let fitting = view.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        if fitting.width > 0, fitting.height > 0 { return fitting }
+        let fits = view.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude))
+        return (fits.width > 0 && fits.height > 0) ? fits : view.bounds.size
+    }
+
     private func makeAttachment(widget: HTagWidget, style: HTagTextStyle) -> Attachment {
         let view = widget.view
-        var size = widget.size
-        if size == .zero {
-            let fitting = view.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
-            if fitting.width > 0, fitting.height > 0 {
-                size = fitting
-            } else {
-                let fits = view.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude))
-                size = (fits.width > 0 && fits.height > 0) ? fits : view.bounds.size
-            }
-        }
-
+        let autoSize = widget.size == .zero
+        let size = autoSize ? ZLRichLabel.measure(view) : widget.size
         let font = (style[.font] as? UIFont) ?? self.font ?? UIFont.systemFont(ofSize: 17)
-        let height = size.height
-        var ascent: CGFloat
-        var descent: CGFloat
-        switch widget.alignment {
-        case .baseline, .aboveBaseline:
-            ascent = height
-            descent = 0
-        case .belowBaseline:
-            ascent = 0
-            descent = height
-        case .top:
-            ascent = font.ascender
-            descent = height - font.ascender
-        case .bottom:
-            descent = -font.descender
-            ascent = height - descent
-        case .middle:
-            let mid = (font.ascender + font.descender) / 2
-            ascent = height / 2 + mid
-            descent = height / 2 - mid
-        }
 
         // View 可能被复用：移除之前添加的点击
         view.gestureRecognizers?.filter { $0 is TagTapGestureRecognizer }.forEach { view.removeGestureRecognizer($0) }
 
-        let attachment = Attachment(id: nextAttachmentId, view: view, size: size, ascent: ascent, descent: descent)
+        let attachment = Attachment(id: nextAttachmentId, view: view, alignment: widget.alignment,
+                                    font: font, autoSize: autoSize, size: size)
         nextAttachmentId += 1
         attachments[attachment.id] = attachment
         return attachment
@@ -432,7 +444,22 @@ open class ZLRichLabel: TTTAttributedLabel {
         view.addGestureRecognizer(tap)
     }
 
+    private static let runDelegateKey = NSAttributedString.Key(kCTRunDelegateAttributeName as String)
+
     private func makeAttachmentString(_ attachment: Attachment, style: HTagTextStyle) -> NSAttributedString {
+        guard let delegate = makeRunDelegate(attachment) else { return NSAttributedString() }
+        var attrs = style
+        attrs[.foregroundColor] = UIColor.clear
+        attrs[.underlineStyle] = nil
+        attrs[.strikethroughStyle] = nil
+        attrs[.backgroundColor] = nil
+        attrs[ZLRichLabel.runDelegateKey] = delegate
+        attrs[ZLRichLabel.attachmentKey] = attachment.id
+        return NSAttributedString(string: String(utf16CodeUnits: [ZLRichLabel.attachmentChar], count: 1), attributes: attrs)
+    }
+
+    /// 按 Attachment 当前尺寸生成占位用的 CTRunDelegate
+    private func makeRunDelegate(_ attachment: Attachment) -> CTRunDelegate? {
         let metrics = RunMetrics(ascent: attachment.ascent, descent: attachment.descent, width: attachment.size.width)
         var callbacks = CTRunDelegateCallbacks(
             version: kCTRunDelegateVersion1,
@@ -451,17 +478,82 @@ open class ZLRichLabel: TTTAttributedLabel {
         let refCon = Unmanaged.passRetained(metrics).toOpaque()
         guard let delegate = CTRunDelegateCreate(&callbacks, refCon) else {
             Unmanaged<RunMetrics>.fromOpaque(refCon).release()
-            return NSAttributedString()
+            return nil
+        }
+        return delegate
+    }
+
+    // MARK: 自定义 View 尺寸变化
+
+    /// 自定义 View 的尺寸 / 内容变化后，刷新排版（不会重新执行规则 handler / builder）。
+    ///
+    /// - 外部修改了 View 的 frame / bounds 尺寸：使用新尺寸
+    /// - `HTagWidget.size` 为 `.zero`（自动尺寸）且尺寸没被外部修改：重新测量（适用于 View 内容变化，如 UILabel 换了文字）
+    ///
+    /// 直接修改 View 的 frame 尺寸时 label 下次布局会自动检测并刷新，一般无需调用；
+    /// 也可以在 View 内部调用 `zl_setNeedsRichLabelLayout()`
+    @objc(invalidateLayoutForAttachmentView:)
+    open func invalidateLayout(forAttachmentView view: UIView) {
+        guard let attachment = attachments.values.first(where: { $0.view === view }) else { return }
+        if let size = resolvedSize(of: attachment) {
+            applyAttachmentSizes([attachment.id: size])
+        }
+    }
+
+    /// 刷新所有自定义 View 的尺寸与排版，规则同 `invalidateLayout(forAttachmentView:)`
+    open func invalidateAttachmentLayout() {
+        var changes: [Int: CGSize] = [:]
+        for attachment in attachments.values {
+            if let size = resolvedSize(of: attachment) { changes[attachment.id] = size }
+        }
+        applyAttachmentSizes(changes)
+    }
+
+    /// View 应有的新尺寸：外部改过尺寸用当前尺寸；自动尺寸的重新测量
+    private func resolvedSize(of attachment: Attachment) -> CGSize? {
+        let current = attachment.view.bounds.size
+        if let applied = attachment.appliedSize, current != applied { return current }
+        return attachment.autoSize ? ZLRichLabel.measure(attachment.view) : nil
+    }
+
+    /// 外部直接修改了 View 尺寸（与上次布局设置的不同）的 Attachment
+    private func externallyResizedAttachments() -> [Int: CGSize] {
+        var changes: [Int: CGSize] = [:]
+        for attachment in attachments.values {
+            let current = attachment.view.bounds.size
+            if let applied = attachment.appliedSize, current != applied { changes[attachment.id] = current }
+        }
+        return changes
+    }
+
+    /// 更新占位尺寸：只替换对应占位符的 CTRunDelegate，链接与其他内容不变
+    private func applyAttachmentSizes(_ sizes: [Int: CGSize]) {
+        var changed = Set<Int>()
+        for (id, size) in sizes {
+            guard let attachment = attachments[id] else { continue }
+            attachment.appliedSize = nil
+            guard size != attachment.size else { continue }
+            attachment.update(size: size)
+            changed.insert(id)
+        }
+        guard !changed.isEmpty, let attr = attributedText, attr.length > 0 else {
+            setNeedsLayout()
+            return
         }
 
-        var attrs = style
-        attrs[.foregroundColor] = UIColor.clear
-        attrs[.underlineStyle] = nil
-        attrs[.strikethroughStyle] = nil
-        attrs[.backgroundColor] = nil
-        attrs[NSAttributedString.Key(kCTRunDelegateAttributeName as String)] = delegate
-        attrs[ZLRichLabel.attachmentKey] = attachment.id
-        return NSAttributedString(string: String(utf16CodeUnits: [ZLRichLabel.attachmentChar], count: 1), attributes: attrs)
+        let mutable = NSMutableAttributedString(attributedString: attr)
+        mutable.enumerateAttribute(ZLRichLabel.attachmentKey,
+                                   in: NSRange(location: 0, length: mutable.length), options: []) { value, range, _ in
+            guard let id = value as? Int, changed.contains(id),
+                  let attachment = attachments[id], let delegate = makeRunDelegate(attachment) else { return }
+            mutable.addAttribute(ZLRichLabel.runDelegateKey, value: delegate, range: range)
+        }
+        // TTTAttributedLabel.setAttributedText 会重建 framesetter，且不会清空已添加的链接
+        attributedText = mutable
+
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
+        setNeedsDisplay()
     }
 
     /// 把内容中的 NSTextAttachment（图片）转换为 UIImageView 占位
@@ -621,6 +713,10 @@ open class ZLRichLabel: TTTAttributedLabel {
 
     /// 与 TTTAttributedLabel 的绘制逻辑保持一致，计算自定义 View 的位置
     private func layoutAttachmentViews() {
+        // 外部直接修改了 View 的尺寸（例如点击后展开）：先更新占位尺寸再布局
+        let resized = externallyResizedAttachments()
+        if !resized.isEmpty { applyAttachmentSizes(resized) }
+
         attachments.values.forEach { $0.view.isHidden = true }
         guard !attachments.isEmpty,
               let attr = attributedText, attr.length > 0,
@@ -677,6 +773,7 @@ open class ZLRichLabel: TTTAttributedLabel {
                                                y: baselineY - attachment.ascent,
                                                width: attachment.size.width,
                                                height: attachment.size.height)
+                attachment.appliedSize = attachment.view.bounds.size
                 attachment.view.isHidden = false
             }
         }
@@ -740,6 +837,26 @@ public extension ZLRichLabelUpdatable where Self: ZLRichLabel {
         beginUpdates()
         block(self)
         endUpdates()
+    }
+}
+
+// MARK: - 自定义 View 尺寸变化
+
+public extension UIView {
+    /// 当前 View（或其子 View）作为自定义 View 内嵌在 `ZLRichLabel` 中时，
+    /// 尺寸 / 内容变化后调用，让所在的 label 重新排版
+    @objc(zl_setNeedsRichLabelLayout)
+    func zl_setNeedsRichLabelLayout() {
+        var child: UIView = self
+        var parent = superview
+        while let current = parent {
+            if let label = current as? ZLRichLabel {
+                label.invalidateLayout(forAttachmentView: child)
+                return
+            }
+            child = current
+            parent = current.superview
+        }
     }
 }
 

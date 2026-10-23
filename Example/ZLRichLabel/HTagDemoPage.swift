@@ -42,6 +42,9 @@ final class HTagDemoPage: UIViewController {
     /// 用例 16 的勾选状态
     private var agreed16 = false
     private weak var case16Label: ZLTagRichLabel?
+    /// 用例 21 的状态（label rebuild 时 builder 会按状态重新创建 View）
+    private var boxWidth21: CGFloat = 24
+    private var likes21 = 0
 
     private static let baseStyle: HTagTextStyle = [
         .font: UIFont.systemFont(ofSize: 15),
@@ -79,6 +82,8 @@ final class HTagDemoPage: UIViewController {
         case18()
         case19()
         case20()
+        // 自定义 View 尺寸变化
+        case21()
         stackView.addArrangedSubview(historyCard)
 
         refreshTapViews()
@@ -617,12 +622,74 @@ final class HTagDemoPage: UIViewController {
             }
         }
     }
+
+    // MARK: - 自定义 View 尺寸变化
+
+    /// 21. 自定义 View 尺寸 / 内容变化后，label 自动重新排版
+    private func case21() {
+        addCase("21. 自定义 View 尺寸变化，自动刷新排版",
+                source: "Tap the box <h1>box</h1> to resize it, tap <h2>like</h2> to add likes, "
+                    + "the following text reflows automatically.") { v in
+            v.tagStyle = [.foregroundColor: UIColor.mBlue]
+            v.tagWidgetBuilder = { [weak self] info, _ in
+                guard let self = self else { return nil }
+                switch info.name {
+                case "h1":
+                    return DemoWidgets.growBox(width: self.boxWidth21, target: self, action: #selector(self.growBox21(_:)))
+                case "h2":
+                    return DemoWidgets.likeCounter(self.likes21, target: self, action: #selector(self.like21(_:)))
+                default:
+                    return nil
+                }
+            }
+        }
+    }
+
+    /// 直接修改 View 的 frame 尺寸：label 下次布局时自动检测并重新排版，无需额外调用
+    @objc private func growBox21(_ gesture: UITapGestureRecognizer) {
+        guard let box = gesture.view else { return }
+        boxWidth21 = boxWidth21 >= 120 ? 24 : boxWidth21 + 32
+        box.frame.size.width = boxWidth21
+    }
+
+    /// 自动尺寸（size == .zero）的 View 内容变化：调用 zl_setNeedsRichLabelLayout() 重新测量
+    @objc private func like21(_ gesture: UITapGestureRecognizer) {
+        guard let counter = gesture.view as? UILabel else { return }
+        likes21 += 1
+        counter.text = DemoWidgets.likeText(likes21)
+        counter.zl_setNeedsRichLabelLayout()
+    }
 }
 
 
 // MARK: - 自定义 Widget
 
 private enum DemoWidgets {
+    /// 可变宽度的色块（固定尺寸，点击时外部直接改 frame）
+    static func growBox(width: CGFloat, target: Any, action: Selector) -> HTagWidget {
+        let box = UIView()
+        box.backgroundColor = .mOrange
+        box.layer.cornerRadius = 4
+        box.addGestureRecognizer(UITapGestureRecognizer(target: target, action: action))
+        return HTagWidget(view: box, size: CGSize(width: width, height: 16), tappable: false)
+    }
+
+    static func likeText(_ likes: Int) -> String { "👍 \(likes)" }
+
+    /// 点赞计数（size 传 .zero 自动计算，文字变化后重新测量）
+    static func likeCounter(_ likes: Int, target: Any, action: Selector) -> HTagWidget {
+        let counter = PaddingLabel(insets: UIEdgeInsets(top: 1, left: 6, bottom: 1, right: 6))
+        counter.text = likeText(likes)
+        counter.font = .systemFont(ofSize: 12)
+        counter.textColor = .white
+        counter.backgroundColor = .mPink
+        counter.layer.cornerRadius = 9
+        counter.layer.masksToBounds = true
+        counter.isUserInteractionEnabled = true
+        counter.addGestureRecognizer(UITapGestureRecognizer(target: target, action: action))
+        return HTagWidget(view: counter, tappable: false)
+    }
+
     /// 按钮样式（替换文字）
     static func button(_ title: String) -> HTagWidget {
         let button = PaddingLabel(insets: UIEdgeInsets(top: 2, left: 10, bottom: 2, right: 10))
@@ -920,6 +987,10 @@ private final class PaddingLabel: UILabel {
 
     override func drawText(in rect: CGRect) {
         super.drawText(in: rect.inset(by: insets))
+    }
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        return intrinsicContentSize
     }
 
     override var intrinsicContentSize: CGSize {

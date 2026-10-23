@@ -70,6 +70,10 @@ static NSString *OCQuote(NSString *s) {
     [super drawTextInRect:UIEdgeInsetsInsetRect(rect, self.insets)];
 }
 
+- (CGSize)sizeThatFits:(CGSize)size {
+    return self.intrinsicContentSize;
+}
+
 - (CGSize)intrinsicContentSize {
     CGSize size = [super intrinsicContentSize];
     return CGSizeMake(ceil(size.width + self.insets.left + self.insets.right),
@@ -84,6 +88,41 @@ static NSString *OCQuote(NSString *s) {
 @end
 
 @implementation OCDemoWidgets
+
+/// 可变宽度的色块（固定尺寸，点击时外部直接改 frame）
++ (HTagWidget *)growBox:(CGFloat)width target:(id)target action:(SEL)action {
+    UIView *box = [UIView new];
+    box.backgroundColor = kOrange;
+    box.layer.cornerRadius = 4;
+    [box addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:target action:action]];
+    return [[HTagWidget alloc] initWithView:box
+                                       size:CGSizeMake(width, 16)
+                                   position:HTagWidgetPositionReplace
+                                  alignment:HTagWidgetAlignmentMiddle
+                                   tappable:NO];
+}
+
++ (NSString *)likeText:(NSInteger)likes {
+    return [NSString stringWithFormat:@"👍 %ld", (long)likes];
+}
+
+/// 点赞计数（size 传 CGSizeZero 自动计算，文字变化后重新测量）
++ (HTagWidget *)likeCounter:(NSInteger)likes target:(id)target action:(SEL)action {
+    OCPaddingLabel *counter = [[OCPaddingLabel alloc] initWithInsets:UIEdgeInsetsMake(1, 6, 1, 6)];
+    counter.text = [self likeText:likes];
+    counter.font = [UIFont systemFontOfSize:12];
+    counter.textColor = UIColor.whiteColor;
+    counter.backgroundColor = kPink;
+    counter.layer.cornerRadius = 9;
+    counter.layer.masksToBounds = YES;
+    counter.userInteractionEnabled = YES;
+    [counter addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:target action:action]];
+    return [[HTagWidget alloc] initWithView:counter
+                                       size:CGSizeZero
+                                   position:HTagWidgetPositionReplace
+                                  alignment:HTagWidgetAlignmentMiddle
+                                   tappable:NO];
+}
 
 /// 按钮样式（替换文字）
 + (HTagWidget *)button:(NSString *)title {
@@ -485,6 +524,9 @@ static NSString *OCQuote(NSString *s) {
 @property (nonatomic, assign) BOOL agreed16;
 @property (nonatomic, weak) ZLTagRichLabel *case11Label;
 @property (nonatomic, weak) ZLTagRichLabel *case16Label;
+/// 用例 21 的状态（label rebuild 时 builder 会按状态重新创建 View）
+@property (nonatomic, assign) CGFloat boxWidth21;
+@property (nonatomic, assign) NSInteger likes21;
 @end
 
 @implementation OCDemoViewController
@@ -502,6 +544,7 @@ static NSString *OCQuote(NSString *s) {
     self.view.backgroundColor = OCHex(0xFEF7FF);
     self.history = [NSMutableArray array];
     self.cards = [NSMutableDictionary dictionary];
+    self.boxWidth21 = 24;
 
     UIBarButtonItem *clear = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemTrash
                                                                            target:self
@@ -533,6 +576,8 @@ static NSString *OCQuote(NSString *s) {
     [self case18];
     [self case19];
     [self case20];
+    // 自定义 View 尺寸变化
+    [self case21];
     [self.stackView addArrangedSubview:self.historyCard];
 
     [self refreshTapViews];
@@ -1100,6 +1145,49 @@ static NSString *OCQuote(NSString *s) {
             }];
         }];
     }];
+}
+
+#pragma mark - 自定义 View 尺寸变化
+
+/// 21. 自定义 View 尺寸 / 内容变化后，label 自动重新排版
+- (void)case21 {
+    __weak typeof(self) weakSelf = self;
+    [self addCase:@"21. 自定义 View 尺寸变化，自动刷新排版"
+           source:@"Tap the box <h1>box</h1> to resize it, tap <h2>like</h2> to add likes, "
+                  @"the following text reflows automatically."
+        configure:^(ZLTagRichLabel *v) {
+        v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
+        v.tagWidgetBuilder = ^HTagWidget *(HTagInfo *info, NSDictionary<NSAttributedStringKey, id> *style) {
+            OCDemoViewController *strongSelf = weakSelf;
+            if (!strongSelf) { return nil; }
+            if ([info.name isEqualToString:@"h1"]) {
+                return [OCDemoWidgets growBox:strongSelf.boxWidth21 target:strongSelf action:@selector(growBox21:)];
+            }
+            if ([info.name isEqualToString:@"h2"]) {
+                return [OCDemoWidgets likeCounter:strongSelf.likes21 target:strongSelf action:@selector(like21:)];
+            }
+            return nil;
+        };
+    }];
+}
+
+/// 直接修改 View 的 frame 尺寸：label 下次布局时自动检测并重新排版，无需额外调用
+- (void)growBox21:(UITapGestureRecognizer *)gesture {
+    UIView *box = gesture.view;
+    if (!box) { return; }
+    self.boxWidth21 = self.boxWidth21 >= 120 ? 24 : self.boxWidth21 + 32;
+    CGRect frame = box.frame;
+    frame.size.width = self.boxWidth21;
+    box.frame = frame;
+}
+
+/// 自动尺寸（size 为 CGSizeZero）的 View 内容变化：调用 zl_setNeedsRichLabelLayout 重新测量
+- (void)like21:(UITapGestureRecognizer *)gesture {
+    if (![gesture.view isKindOfClass:UILabel.class]) { return; }
+    UILabel *counter = (UILabel *)gesture.view;
+    self.likes21 += 1;
+    counter.text = [OCDemoWidgets likeText:self.likes21];
+    [counter zl_setNeedsRichLabelLayout];
 }
 
 @end

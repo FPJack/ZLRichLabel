@@ -22,6 +22,7 @@
 - 正则规则：任意 `NSRegularExpression` / `NSDataDetector`，支持捕获组、命名捕获组
 - 规则优先级：命中范围重叠时按 `priority` → 位置 → 长度 → 添加顺序取舍
 - 命中内容完全由外部决定：加属性、替换文字、插入 `NSTextAttachment` 图片、插入任意 `UIView`
+- 自定义 View 尺寸 / 内容变化后自动重新排版
 - 点击与按下高亮：整段可点击（包括其中的图片 / View），可按规则 / 标签名设置不同的高亮样式
 - `<h>` 标签：`<h>`、`<h1>`…`<hN>`，`</h1>` 和 `<h1/>` 两种闭合写法，不区分大小写；按标签名区分样式与点击；可替换为自定义 View
 - 容错：开闭不匹配、未闭合的标签原样显示，不影响后面的标签
@@ -96,7 +97,7 @@ label.update { v in
         v.addRule(TagRichRule(name: "link", regex: detector, priority: 10) { ctx in
             let url = ctx.match.result.url
             ctx.setText("🔗网页链接", attributes: [.foregroundColor: UIColor.systemBlue])
-            ctx.onTap = { url.map { UIApplication.shared.open($0) } }
+            ctx.onTap = { if let url = url { UIApplication.shared.open(url) } }
         })
     }
 
@@ -162,6 +163,30 @@ try? label.addRule(name: "vip", pattern: "\\[vip\\]") { ctx in
     ctx.attributedString.setAttributedString(ctx.attachmentString(for: widget))
 }
 ```
+
+### 自定义 View 尺寸变化
+
+内嵌的自定义 View（`HTagWidget` / `attachmentString(for:)` / `tagWidgetBuilder`）尺寸或内容变化后，label 会重新排版：后面的文字跟着移动、换行，label 高度同步更新（Auto Layout 下会触发外部重新布局）。只替换占位尺寸，**不会**重新执行规则 handler / builder，已有的点击和链接保持不变。
+
+| 场景 | 做法 |
+| --- | --- |
+| 直接修改 View 的 `frame` / `bounds` 尺寸 | 无需额外调用，label 下次布局时自动检测并刷新 |
+| 自动尺寸（`size: .zero`）的 View 内容变化，如 UILabel 换了文字 | 调用 `view.zl_setNeedsRichLabelLayout()`，重新测量后刷新 |
+| 批量刷新 | `label.invalidateLayout(forAttachmentView:)` / `label.invalidateAttachmentLayout()` |
+
+```swift
+// 1. 直接改 frame：自动刷新
+box.frame.size.width = 120
+
+// 2. 自动尺寸的 View 内容变了：通知所在 label 重新测量（在任意子 View 上调用都可以）
+counter.text = "👍 99"
+counter.zl_setNeedsRichLabelLayout()
+```
+
+注意：
+
+- 固定尺寸（`size` 不为 `.zero`）且没有改过 frame 的 View，调用刷新不会改变其尺寸
+- 之后如果 label `rebuild()`（修改样式、文字等），builder / handler 会重新执行，View 尺寸以新返回的 `HTagWidget` 为准。需要保留变化后的状态时，请把状态存在外部，builder 按状态创建 View（见 Example 用例 21）
 
 > ⚠️ 不要在 `onTap` 中强引用 `ctx`（`ctx` 持有 `onTap` 会形成循环引用），先把需要的值取出来再捕获。
 
@@ -250,6 +275,8 @@ label.tagWidgetBuilder = { info, _ in
 }
 ```
 
+View 的尺寸或内容变化后会自动 / 手动刷新排版，见 [自定义 View 尺寸变化](#自定义-view-尺寸变化)。
+
 `HTagWidget` 参数：
 
 | 参数 | 说明 |
@@ -299,6 +326,7 @@ HTagParser.tags("<h1>a</h1>")        // 独立解析，不创建 label
 | `numberOfLines` / `lineBreakMode` | 多行与截断 |
 | `update { }` / `beginUpdates()` / `endUpdates()` | 批量修改，只渲染一次 |
 | `rebuild()` | 强制重新渲染（如外部状态变化后需要重新调用 builder / handler） |
+| `invalidateAttachmentLayout()` / `invalidateLayout(forAttachmentView:)` | 自定义 View 尺寸 / 内容变化后刷新排版（不重新执行 builder / handler） |
 | `isRightToLeft` | 当前内容是否为 RTL |
 
 布局：
@@ -383,6 +411,8 @@ label.numberOfLines = 0;
 | `ctx.group(1)` / `ctx.group(named:)` | `[ctx groupAtIndex:1]` / `[ctx groupNamed:]` |
 | `info.level`（`Int?`） | `info.level`（`NSNumber *`，`<h>` 时为 `nil`） |
 | `TagRichParser.resolve(_:rules:)` | `[TagRichParser matchesInString:rules:]` |
+| `view.zl_setNeedsRichLabelLayout()` | `[view zl_setNeedsRichLabelLayout]` |
+| `invalidateLayout(forAttachmentView:)` | `invalidateLayoutForAttachmentView:` |
 
 ## Example
 
@@ -401,6 +431,7 @@ open ZLRichLabel.xcworkspace
 | 12 – 16 | 阿拉伯语 RTL：样式与点击、双向混排、截断、自定义 View / 图标、勾选框 |
 | 17、18、20 | `ZLRichLabel` 自定义规则：@提及 / #话题# / 链接、表情图片 / 模板变量、简易 Markdown |
 | 19 | `ZLTagRichLabel`：`<h>` 标签与自定义规则的优先级 |
+| 21 | 自定义 View 尺寸变化自动刷新排版：点击色块改 frame 变宽、点赞计数文字变化 |
 
 页面顶部会显示最近一次点击得到的完整信息，底部有点击历史。
 
