@@ -626,3 +626,149 @@ class GestureTests: XCTestCase {
         XCTAssertNil(label.match(at: p))
     }
 }
+
+/// 选中复制
+class SelectionTests: XCTestCase {
+
+    private var window: UIWindow!
+
+    override func setUp() {
+        super.setUp()
+        window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        window.isHidden = false
+    }
+
+    override func tearDown() {
+        window.isHidden = true
+        window = nil
+        super.tearDown()
+    }
+
+    /// 原文："Hi [smile] @alice, hello world"
+    /// 展示："Hi \u{FFFC} 👤alice, hello world"（表情替换为图片，@ 替换为 👤）
+    private func makeLabel() -> ZLRichLabel {
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: 300, height: 0))
+        label.numberOfLines = 0
+        label.update { v in
+            v.isSelectable = true
+            v.style = [.font: UIFont.systemFont(ofSize: 15)]
+            try? v.addRule(name: "emoji", pattern: "\\[smile\\]") { ctx in
+                let attachment = NSTextAttachment()
+                attachment.image = UIImage(systemName: "face.smiling")
+                attachment.bounds = CGRect(x: 0, y: 0, width: 16, height: 16)
+                ctx.attributedString.setAttributedString(NSAttributedString(attachment: attachment))
+            }
+            try? v.addRule(name: "mention", pattern: "@\\w+") { ctx in
+                ctx.setText("👤" + ctx.matchedText.dropFirst())
+            }
+            v.text = "Hi [smile] @alice, hello world"
+        }
+        window.addSubview(label)
+        let size = label.sizeThatFits(CGSize(width: 300, height: CGFloat.greatestFiniteMagnitude))
+        label.frame = CGRect(x: 0, y: 0, width: 300, height: size.height)
+        label.layoutIfNeeded()
+        return label
+    }
+
+    private func range(of text: String, in label: ZLRichLabel) -> NSRange {
+        return (label.attributedText.string as NSString).range(of: text)
+    }
+
+    func testRawTextMapping() {
+        let label = makeLabel()
+        XCTAssertEqual(label.attributedText.string, "Hi \u{FFFC} 👤alice, hello world")
+
+        label.selectAllText()
+        XCTAssertTrue(label.hasSelection)
+        XCTAssertEqual(label.selectedRawText, "Hi [smile] @alice, hello world", "全选的原文与 rawText 一致")
+        XCTAssertEqual(label.selectedText, "Hi  👤alice, hello world", "展示文字去掉图片占位符")
+
+        // 普通文字逐字对应
+        label.select(range: range(of: "hello", in: label))
+        XCTAssertEqual(label.selectedText, "hello")
+        XCTAssertEqual(label.selectedRawText, "hello")
+
+        // 只选中命中的一部分：原文取整个命中
+        label.select(range: range(of: "ali", in: label))
+        XCTAssertEqual(label.selectedText, "ali")
+        XCTAssertEqual(label.selectedRawText, "@alice")
+
+        // 跨越图片
+        let start = range(of: "Hi", in: label).location
+        let end = NSMaxRange(range(of: "👤", in: label))
+        label.select(range: NSRange(location: start, length: end - start))
+        XCTAssertEqual(label.selectedRawText, "Hi [smile] @alice")
+    }
+
+    func testSelectionAppearanceAndClear() {
+        let label = makeLabel()
+        var changes: [NSRange] = []
+        label.onSelectionChanged = { changes.append($0) }
+        XCTAssertFalse(label.canBecomeFirstResponder, "没有选中时不成为第一响应者")
+
+        let world = range(of: "world", in: label)
+        label.select(range: world)
+        XCTAssertEqual(label.selectedRange, world)
+        XCTAssertTrue(label.canBecomeFirstResponder)
+        XCTAssertTrue(label.canPerformAction(#selector(UIResponderStandardEditActions.copy(_:)), withSender: nil))
+        XCTAssertTrue(label.canPerformAction(#selector(UIResponderStandardEditActions.selectAll(_:)), withSender: nil))
+
+        // 选中背景与两个拖柄
+        let selectionLayer = label.layer.sublayers?.compactMap { $0 as? CAShapeLayer }.first
+        XCTAssertNotNil(selectionLayer?.path)
+        let rect = selectionLayer!.path!.boundingBox
+        XCTAssertGreaterThan(rect.width, 10)
+        // world 在单行文字的末尾：右边界与文字宽度一致
+        let textWidth = label.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: 100)).width
+        XCTAssertEqual(rect.maxX, textWidth, accuracy: 1.5, "world 在行尾")
+        XCTAssertGreaterThan(rect.minX, textWidth * 0.6)
+        let handles = label.subviews.filter { String(describing: type(of: $0)).contains("SelectionHandle") }
+        XCTAssertEqual(handles.count, 2)
+        XCTAssertTrue(handles.allSatisfy { !$0.isHidden })
+
+        // 越界会被截断
+        label.select(range: NSRange(location: world.location, length: 999))
+        XCTAssertEqual(label.selectedRange, world)
+
+        label.clearSelection()
+        XCTAssertFalse(label.hasSelection)
+        XCTAssertNil(label.selectedText)
+        XCTAssertTrue(handles.allSatisfy { $0.isHidden })
+        XCTAssertEqual(changes.count, 2)
+        XCTAssertEqual(changes.last?.location, NSNotFound)
+    }
+
+    func testCopyAndCallbacks() {
+        let label = makeLabel()
+        var copied: [(String, Bool)] = []
+        label.onCopy = { copied.append(($0, $1)) }
+        label.select(range: range(of: "👤alice", in: label))
+
+        label.copySelection(raw: false)
+        XCTAssertEqual(UIPasteboard.general.string, "👤alice")
+        label.zl_copyRawText(nil)
+        XCTAssertEqual(UIPasteboard.general.string, "@alice")
+        XCTAssertEqual(copied.map { $0.0 }, ["👤alice", "@alice"])
+        XCTAssertEqual(copied.map { $0.1 }, [false, true])
+    }
+
+    func testRenderClearsSelectionAndCollapseTokenExcluded() {
+        let label = makeLabel()
+        label.selectAllText()
+        label.text = "Hi @bob"
+        XCTAssertFalse(label.hasSelection, "内容变化后取消选中")
+
+        label.collapseToken = NSAttributedString(string: " 收起")
+        label.isExpanded = true
+        XCTAssertTrue(label.attributedText.string.hasSuffix(" 收起"))
+        label.selectAllText()
+        XCTAssertEqual(label.selectedText, "Hi 👤bob", "全选不包含「收起」")
+        XCTAssertEqual(label.selectedRawText, "Hi @bob")
+        XCTAssertFalse(label.canPerformAction(#selector(UIResponderStandardEditActions.selectAll(_:)), withSender: nil),
+                       "已全选时不显示「全选」")
+
+        label.isSelectable = false
+        XCTAssertFalse(label.hasSelection)
+        XCTAssertFalse(label.canPerformAction(#selector(UIResponderStandardEditActions.copy(_:)), withSender: nil))
+    }
+}

@@ -103,6 +103,8 @@ final class HTagDemoPage: UIViewController {
         case24()
         // 长按 / 双击 / 扩大点击热区
         case25()
+        // 选中复制
+        case26()
         stackView.addArrangedSubview(historyCard)
 
         refreshTapViews()
@@ -789,6 +791,60 @@ final class HTagDemoPage: UIViewController {
 
     @objc private func scaleSwitchChanged22(_ sender: UISwitch) {
         case22Label?.adjustsFontForContentSizeCategory = sender.isOn
+    }
+
+    // MARK: - 选中复制
+
+    /// 26. 选中复制：长按选词、拖动 / 拖柄调整范围，菜单「复制 / 复制原文 / 全选」
+    private func case26() {
+        let name = "26. 选中复制（isSelectable）"
+        let source = "长按选中一个词，拖动手指或两端的拖柄调整范围 [smile]，松手弹出菜单："
+            + "「复制」得到展示文字，「复制原文」得到 @alice 和 [smile] 的原始写法。"
+            + "点击 <h1>用户协议</h1> 仍然可以跳转，点击文字取消选中。"
+
+        let label = ZLTagRichLabel(frame: .zero)
+        label.numberOfLines = 0
+        label.verticalAlignment = .top
+        let status = CardView.label("长按文字开始选中", font: .monospacedSystemFont(ofSize: 11, weight: .regular),
+                                    color: UIColor(white: 0, alpha: 0.6))
+        label.update { [weak label, weak status] v in
+            v.style = HTagDemoPage.baseStyle
+            v.isSelectable = true
+            v.tagStyle = [.foregroundColor: UIColor.mBlue]
+            v.onTagTap = { [weak self] info in self?.onTap(name, info) }
+            // 表情：选中后「复制」得到空（图片），「复制原文」得到 [smile]
+            try? v.addRule(name: "emoji", pattern: "\\[smile\\]") { ctx in
+                let attachment = NSTextAttachment()
+                attachment.image = UIImage(systemName: "face.smiling")?.withRenderingMode(.alwaysTemplate)
+                attachment.bounds = CGRect(x: 0, y: 0, width: 17, height: 17)
+                let content = NSMutableAttributedString(attachment: attachment)
+                content.addAttributes([.foregroundColor: UIColor.mOrange], range: NSRange(location: 0, length: content.length))
+                ctx.attributedString.setAttributedString(content)
+            }
+            // @提及：展示为 👤alice，原文为 @alice（长按命中时整体选中）
+            try? v.addRule(name: "mention", pattern: "@\\w+") { ctx in
+                ctx.setText("👤" + ctx.matchedText.dropFirst(), attributes: [.foregroundColor: UIColor.mPurple])
+            }
+            v.onSelectionChanged = { range in
+                guard let label = label else { return }
+                status?.text = range.location == NSNotFound ? "未选中" :
+                    "selectedRange   = {\(range.location), \(range.length)}\n"
+                    + "selectedText    = \"\(label.selectedText ?? "")\"\n"
+                    + "selectedRawText = \"\(label.selectedRawText ?? "")\""
+            }
+            v.onCopy = { [weak self] text, isRaw in
+                let info = HTagInfo(index: 0, name: isRaw ? "copy-raw" : "copy", text: text, raw: "")
+                self?.onTap(name, info, action: isRaw ? "onCopy → 复制原文" : "onCopy → 复制展示文字")
+            }
+            v.text = source
+        }
+
+        let content = UIStackView(arrangedSubviews: [label, status])
+        content.axis = .vertical
+        content.spacing = 8
+        let card = DemoCard(title: name, source: source, content: content)
+        cards[name] = card
+        stackView.addArrangedSubview(card)
     }
 
     // MARK: - 长按 / 双击 / 扩大点击热区

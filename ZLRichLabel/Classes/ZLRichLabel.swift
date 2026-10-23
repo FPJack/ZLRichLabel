@@ -224,6 +224,48 @@ open class ZLRichLabel: TTTAttributedLabel {
     /// 双击手势，`onDoubleTap` 为 nil 时为 nil
     public private(set) var richDoubleTapGesture: UITapGestureRecognizer?
 
+    // MARK: 选中复制（实现见 ZLRichLabel+Selection.swift）
+
+    /// 是否可以选中复制，默认 false。开启后长按文字选中一个词（命中则选中整个命中），
+    /// 拖动手指或两端的拖柄调整范围，松手后弹出「复制 / 复制原文 / 全选」菜单。
+    /// 开启后长按普通文字用于选中，不再回调 `onLongPress`（命中自己的 `ctx.onLongPress` 仍然优先）
+    open var isSelectable: Bool = false {
+        didSet { if !isSelectable { clearSelection() } }
+    }
+
+    /// 当前选中范围（展示文字中），没有选中时 `location` 为 `NSNotFound`
+    public internal(set) var selectedRange = NSRange(location: NSNotFound, length: 0)
+
+    /// 选中背景色，nil 时使用 `tintColor` 的 25% 透明度
+    open var selectionColor: UIColor? { didSet { updateSelectionAppearance() } }
+
+    /// 选中范围变化（包括清除，此时 `location` 为 `NSNotFound`）
+    open var onSelectionChanged: ((NSRange) -> Void)?
+
+    /// 通过菜单复制后回调：复制的文字，以及是否为原文
+    open var onCopy: ((_ text: String, _ isRawText: Bool) -> Void)?
+
+    /// 菜单标题
+    open var copyMenuTitle = "复制"
+    open var copyRawMenuTitle = "复制原文"
+    open var selectAllMenuTitle = "全选"
+
+    /// 展示文字与原文的对应关系（render 时生成）
+    var displayPieces: [ZLDisplayPiece] = []
+    /// 展示文字中属于正文的长度（不含展开后拼接的「收起」）
+    var contentDisplayLength = 0
+    /// 长按开始时选中的范围（拖动时以它为锚点扩展）
+    var selectionAnchor: NSRange?
+    /// 正在拖动拖柄（期间菜单隐藏，不清除选中）
+    var isAdjustingSelection = false
+    /// 菜单关闭后需要重新弹出（例如点了「全选」）
+    var reshowsSelectionMenu = false
+    lazy var selectionLayer = CAShapeLayer()
+    var selectionHandles: [ZLSelectionHandleView] = []
+    /// iOS 16+ 的 UIEditMenuInteraction 封装
+    var selectionEditMenu: AnyObject?
+    var menuHideObserver: NSObjectProtocol?
+
     /// 切换展开状态并回调 `onExpandChanged`，与点击「展开 / 收起」的效果相同
     open func toggleExpanded() {
         isExpanded.toggle()
@@ -662,9 +704,15 @@ open class ZLRichLabel: TTTAttributedLabel {
         var nextCache: [RenderKey: RenderedMatch] = [:]
         var live: [Int: Attachment] = [:]
         var nextDisplayMatches: [(range: NSRange, rendered: RenderedMatch)] = []
+        var pieces: [ZLDisplayPiece] = []
+        var rawCursor = 0
 
         for seg in segments {
             guard let match = seg.match else {
+                let length = (seg.text as NSString).length
+                pieces.append(ZLDisplayPiece(display: NSRange(location: result.length, length: length),
+                                             raw: NSRange(location: rawCursor, length: length), isMatch: false))
+                rawCursor += length
                 result.append(NSAttributedString(string: seg.text, attributes: baseStyle))
                 continue
             }
@@ -683,12 +731,18 @@ open class ZLRichLabel: TTTAttributedLabel {
             let range = NSRange(location: result.length, length: rendered.content.length)
             result.append(rendered.content)
             if range.length > 0 { nextDisplayMatches.append((range, rendered)) }
+            pieces.append(ZLDisplayPiece(display: range, raw: match.range, isMatch: true))
+            rawCursor = NSMaxRange(match.range)
             if let onTap = rendered.onTap, range.length > 0 {
                 linkItems.append((range, rendered.highlightStyle, onTap))
             }
         }
         renderCache = nextCache
         displayMatches = nextDisplayMatches
+        displayPieces = pieces
+        contentDisplayLength = result.length
+        // 内容变了，之前的选中不再有效
+        clearSelection()
 
         // 移除不再使用的 View（同一个 View 可能被新的命中复用，不能误删）
         let liveViews = Set(live.values.map { ObjectIdentifier($0.view) })
@@ -760,6 +814,9 @@ open class ZLRichLabel: TTTAttributedLabel {
         attachments.removeAll()
         renderCache.removeAll()
         displayMatches = []
+        displayPieces = []
+        contentDisplayLength = 0
+        clearSelection()
     }
 
     /// 执行规则 handler，生成单个命中的渲染结果
@@ -994,6 +1051,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         }
         layoutAttachmentViews()
         layoutExpandToken()
+        if hasSelection { updateSelectionAppearance() }
     }
 
     /// 修复 TTTAttributedLabel.sizeThatFits 的问题：
@@ -1103,7 +1161,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         didSet { setNeedsLayout() }
     }
 
-    private var flushFactor: CGFloat {
+    var flushFactor: CGFloat {
         switch textAlignment {
         case .center: return 0.5
         case .right: return 1.0
@@ -1176,7 +1234,7 @@ open class ZLRichLabel: TTTAttributedLabel {
     }
 
     /// 按 textRect 排版得到的所有行与原点（缓存，内容或区域不变时直接返回）
-    private func frameLines(for attr: NSAttributedString, in textRect: CGRect) -> ([CTLine], [CGPoint]) {
+    func frameLines(for attr: NSAttributedString, in textRect: CGRect) -> ([CTLine], [CGPoint]) {
         let cache = layoutCache(for: attr)
         if cache.frameRect != textRect {
             let path = CGPath(rect: textRect, transform: nil)
@@ -1207,12 +1265,24 @@ open class ZLRichLabel: TTTAttributedLabel {
     }
 
     private lazy var gestureDelegate = RichGestureDelegate(label: self)
+    /// 有选中时点击 label：取消选中（同时吞掉这次点击，不触发链接）
+    fileprivate var selectionDismissTap: UITapGestureRecognizer?
+
+    @objc private func handleSelectionDismissTap(_ gesture: UITapGestureRecognizer) {
+        guard gesture.state == .ended else { return }
+        clearSelection()
+    }
     private var expandTapGesture: UITapGestureRecognizer?
 
     private func setupExpandGesture() {
         // TTT 自带的长按只作用于链接且需要 delegate，这里统一由 richLongPressGesture 处理
         longPressGestureRecognizer?.isEnabled = false
         addGestureRecognizer(richLongPressGesture)
+
+        let dismiss = UITapGestureRecognizer(target: self, action: #selector(handleSelectionDismissTap(_:)))
+        dismiss.delegate = gestureDelegate
+        selectionDismissTap = dismiss
+        addGestureRecognizer(dismiss)
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleExpandTap(_:)))
         tap.delegate = gestureDelegate
@@ -1239,13 +1309,28 @@ open class ZLRichLabel: TTTAttributedLabel {
     }
 
     @objc private func handleRichLongPress(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began else { return }
         let location = gesture.location(in: self)
-        if let item = displayMatch(at: location), let handler = item.rendered.onLongPress {
-            handler()
-            return
+        switch gesture.state {
+        case .began:
+            if let item = displayMatch(at: location), let handler = item.rendered.onLongPress {
+                handler()
+                return
+            }
+            if isSelectable {
+                beginSelection(at: location)
+                return
+            }
+            onLongPress?(gestureInfo(at: location))
+        case .changed:
+            if selectionAnchor != nil { extendSelection(to: location) }
+        case .ended, .cancelled:
+            if selectionAnchor != nil {
+                selectionAnchor = nil
+                showSelectionMenu()
+            }
+        default:
+            break
         }
-        onLongPress?(gestureInfo(at: location))
     }
 
     @objc private func handleRichDoubleTap(_ gesture: UITapGestureRecognizer) {
@@ -1255,8 +1340,43 @@ open class ZLRichLabel: TTTAttributedLabel {
 
     /// 长按是否需要开始：有 `onLongPress` 或该位置的命中设置了 `ctx.onLongPress`
     fileprivate func shouldBeginLongPress(at location: CGPoint) -> Bool {
-        if onLongPress != nil { return true }
+        if onLongPress != nil || isSelectable { return true }
         return displayMatch(at: location)?.rendered.onLongPress != nil
+    }
+
+    // MARK: UIResponder（选中复制菜单）
+
+    /// TTTAttributedLabel 总是返回 YES，这里只在有选中时成为第一响应者
+    open override var canBecomeFirstResponder: Bool {
+        return isSelectable && hasSelection
+    }
+
+    open override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        guard isSelectable, hasSelection else { return false }
+        if action == #selector(copy(_:)) || action == #selector(zl_copyRawText(_:)) { return true }
+        if action == #selector(selectAll(_:)) { return selectedRange.length < contentDisplayLength }
+        return false
+    }
+
+    /// 复制选中的展示文字（TTTAttributedLabel 的实现是复制整段文字）
+    open override func copy(_ sender: Any?) {
+        copySelection(raw: false)
+    }
+
+    open override func selectAll(_ sender: Any?) {
+        reshowsSelectionMenu = true
+        selectAllText()
+    }
+
+    /// 复制选中范围对应的原文（菜单项「复制原文」）
+    @objc open func zl_copyRawText(_ sender: Any?) {
+        copySelection(raw: true)
+    }
+
+    /// 选中时拖柄在 bounds 外，也要能接收触摸
+    open override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        if super.point(inside: point, with: event) { return true }
+        return selectionHandles.contains { !$0.isHidden && $0.frame.contains(point) }
     }
 
     // MARK: 按坐标定位
@@ -1297,6 +1417,11 @@ open class ZLRichLabel: TTTAttributedLabel {
             }
         }
         return nil
+    }
+
+    /// 某个字符所在命中在展示文字中的范围
+    func displayMatchRange(atCharacter index: Int) -> NSRange? {
+        return displayMatch(atCharacter: index)?.range
     }
 
     private func displayMatch(atCharacter index: Int) -> (range: NSRange, rendered: RenderedMatch)? {
@@ -1491,6 +1616,11 @@ private final class RichGestureDelegate: NSObject, UIGestureRecognizerDelegate {
         guard let label = label else { return false }
         if gestureRecognizer === label.richLongPressGesture || gestureRecognizer === label.richDoubleTapGesture {
             return true
+        }
+        if gestureRecognizer === label.selectionDismissTap {
+            // 只在有选中、且没有点到拖柄时接收
+            guard label.hasSelection else { return false }
+            return !label.selectionHandles.contains { !$0.isHidden && $0.frame.contains(touch.location(in: label)) }
         }
         guard !label.isExpanded, label.expandTokenRect != .zero else { return false }
         return label.expandTokenRect.contains(touch.location(in: label))

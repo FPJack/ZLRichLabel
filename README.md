@@ -42,6 +42,7 @@ Swift 与 Objective-C 均可使用，基于 [TTTAttributedLabel](https://github.
 - 多行截断（自定义省略符）、Auto Layout 自适应高度
 - 展开 / 收起：截断时末尾显示可点击的「… 全文」，展开后显示「收起」
 - 长按（整体 / 按命中 / 按标签）、双击、扩大点击热区，可按坐标查询字符和命中
+- 选中复制：长按选词、拖柄调整范围，可复制展示文字或对应的原文
 - 渲染缓存 + 排版缓存：改样式 / 追加文字时只重新处理变化的部分
 - RTL：阿拉伯语 / 希伯来语等从右到左文本自动右对齐，支持双向混排
 - 深色模式自动重新渲染；可选支持 Dynamic Type（系统文字大小）
@@ -65,7 +66,8 @@ pod 'ZLRichLabel'
 ZLRichLabel/Classes/
 ├── ZLRichDefines.swift    样式类型 HTagTextStyle、内嵌 View 配置 HTagWidget
 ├── ZLRichRule.swift       TagRichRule / TagRichMatch / TagRichRuleContext / TagRichParser
-├── ZLRichLabel.swift      基类：规则解析、渲染、内嵌 View、布局、截断、RTL
+├── ZLRichLabel.swift      基类：规则解析、渲染、内嵌 View、布局、截断、RTL、手势
+├── ZLRichLabel+Selection.swift  选中复制：选中范围、拖柄、菜单、展示文字与原文的对应
 └── ZLTagRichLabel.swift   <h> 标签子类、HTagInfo、HTagParser
 ```
 
@@ -409,6 +411,42 @@ label.extendsLinkTouchArea = true
 
 TTTAttributedLabel 自带的 `longPressGestureRecognizer` 只作用于链接且需要 delegate，已被禁用，统一使用 `richLongPressGesture`。
 
+## 选中复制
+
+```swift
+label.isSelectable = true
+label.onCopy = { text, isRawText in print(isRawText ? "原文" : "展示文字", text) }
+label.onSelectionChanged = { range in print(label.selectedText ?? "", label.selectedRawText ?? "") }
+```
+
+- 长按文字选中一个词（中文按系统分词），长按在规则命中上则选中整个命中
+- 不松手拖动扩展范围；松手后可拖动两端的拖柄调整
+- 松手弹出菜单：**复制**（展示文字）、**复制原文**、**全选**（iOS 16+ 使用 `UIEditMenuInteraction`，更低版本使用 `UIMenuController`）
+- 点击 label 或菜单消失（复制后、点击别处）时取消选中；内容变化后自动取消选中
+- 开启后长按普通文字用于选中，不再回调 `onLongPress`；命中自己的 `ctx.onLongPress` / `onTagLongPress` 仍然优先
+
+展示文字与原文的对应：普通文字逐字对应；规则命中（可能替换了文字、换成了图片）只要选中一部分，就对应整个命中的原文。
+
+```text
+原文      Hi [smile] @alice, hello world
+展示文字  Hi  😊   👤alice, hello world
+选中 "ali"          → selectedText "ali"，selectedRawText "@alice"
+全选               → selectedText 去掉图片占位符，selectedRawText 与 rawText 相同
+```
+
+| API | 说明 |
+| --- | --- |
+| `isSelectable` | 是否可以选中，默认 false |
+| `selectedRange` / `hasSelection` | 选中范围（展示文字中），没有选中时 `location == NSNotFound` |
+| `selectedText` | 选中的展示文字（去掉图片 / View 的占位符） |
+| `selectedRawText` | 选中范围对应的原文 |
+| `rawText(forDisplayRange:)` | 任意展示范围对应的原文 |
+| `select(range:)` / `selectAllText()` / `clearSelection()` | 代码控制选中（全选不包含「收起」） |
+| `copySelection(raw:)` | 复制选中内容（与菜单相同，会回调 `onCopy`） |
+| `selectionColor` | 选中背景色，默认 `tintColor` 的 25% 透明度；拖柄使用不透明的同色 |
+| `copyMenuTitle` / `copyRawMenuTitle` / `selectAllMenuTitle` | 菜单标题，默认「复制 / 复制原文 / 全选」 |
+| `onSelectionChanged` / `onCopy` | 选中范围变化 / 复制后回调 |
+
 ## 展开 / 收起
 
 内容超过 `numberOfLines` 行时，最后一行末尾显示 `expandToken`（代替省略符），点击后展开全部内容；展开后在末尾显示 `collapseToken`，点击恢复。
@@ -548,6 +586,8 @@ label.numberOfLines = 0;
 | `onExpandChanged = { expanded in }` | `onExpandChanged = ^(BOOL expanded) {}` |
 | `onLongPress = { info in }` / `onDoubleTap` | `onLongPress = ^(ZLRichGestureInfo *info) {}` |
 | `characterIndex(at:)` / `match(at:)` / `gestureInfo(at:)` | `characterIndexAtPoint:` / `matchAtPoint:` / `gestureInfoAtPoint:` |
+| `select(range:)` / `rawText(forDisplayRange:)` / `copySelection(raw:)` | `selectRange:` / `rawTextForDisplayRange:` / `copySelectionRaw:` |
+| `onCopy = { text, isRaw in }` | `onCopy = ^(NSString *text, BOOL isRaw) {}` |
 
 ## Example
 
@@ -571,6 +611,7 @@ open ZLRichLabel.xcworkspace
 | 23 | 性能：600 个命中（含 200 张图片）的 label，对比改高亮 / 追加文字 / 只刷新一条规则 / `rebuild()` 的耗时与 handler 执行次数，`sizeThatFits` 缓存，1.5 万命中的解析耗时 |
 | 24 | 展开 / 收起：3 行截断显示「… 全文」，展开后显示「收起」；内容不足 3 行时不显示按钮 |
 | 25 | 长按菜单（复制原文 / 展示文字、举报）、@提及与标签各自的长按、双击点赞、扩大点击热区 |
+| 26 | 选中复制：长按选词、拖柄调整，「复制」展示文字 /「复制原文」，下方实时显示 selectedText / selectedRawText |
 
 页面顶部会显示最近一次点击得到的完整信息，底部有点击历史。
 

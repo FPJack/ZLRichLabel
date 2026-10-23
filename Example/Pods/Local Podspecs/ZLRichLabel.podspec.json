@@ -1,8 +1,8 @@
 {
   "name": "ZLRichLabel",
-  "version": "0.1.0",
-  "summary": "A short description of ZLRichLabel.",
-  "description": "TODO: Add long description of the pod here.",
+  "version": "1.0.0",
+  "summary": "Regex-rule based rich text label with <h> tag highlighting, tappable spans, inline images and custom views.",
+  "description": "ZLRichLabel is a rich text label built on TTTAttributedLabel.\nZLRichLabel (base class) parses text with prioritized regex rules and lets you render each match\n(attributes, replaced text, images, inline custom views, tap handling, pressed highlight).\nZLTagRichLabel adds built-in <h>/<h1>/<h2>... tag highlighting with per-tag styles and tap handlers.\nSupports multi-line truncation, Auto Layout self-sizing, RTL text and Objective-C.",
   "homepage": "https://github.com/FPJack/ZLRichLabel.git",
   "license": {
     "type": "MIT",
@@ -13,10 +13,10 @@
   },
   "source": {
     "git": "https://github.com/FPJack/ZLRichLabel.git",
-    "tag": "0.1.0"
+    "tag": "1.0.0"
   },
   "platforms": {
-    "ios": "10.0"
+    "ios": "13.0"
   },
   "swift_versions": "5.0",
   "frameworks": [

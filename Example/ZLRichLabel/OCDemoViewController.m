@@ -603,6 +603,8 @@ static NSString *OCQuote(NSString *s) {
     [self case24];
     // 长按 / 双击 / 扩大点击热区
     [self case25];
+    // 选中复制
+    [self case26];
     [self.stackView addArrangedSubview:self.historyCard];
 
     [self refreshTapViews];
@@ -1339,6 +1341,72 @@ static NSString *OCQuote(NSString *s) {
 
 - (void)scaleSwitchChanged22:(UISwitch *)sender {
     self.case22Label.adjustsFontForContentSizeCategory = sender.isOn;
+}
+
+#pragma mark - 选中复制
+
+/// 26. 选中复制：长按选词、拖动 / 拖柄调整范围，菜单「复制 / 复制原文 / 全选」
+- (void)case26 {
+    NSString *name = @"26. 选中复制（isSelectable）";
+    NSString *source = @"长按选中一个词，拖动手指或两端的拖柄调整范围 [smile]，松手弹出菜单："
+                       @"「复制」得到展示文字，「复制原文」得到 @alice 和 [smile] 的原始写法。"
+                       @"点击 <h1>用户协议</h1> 仍然可以跳转，点击文字取消选中。";
+
+    ZLTagRichLabel *label = [[ZLTagRichLabel alloc] initWithFrame:CGRectZero];
+    label.numberOfLines = 0;
+    label.verticalAlignment = TTTAttributedLabelVerticalAlignmentTop;
+    UILabel *status = [[UILabel alloc] init];
+    status.numberOfLines = 0;
+    status.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
+    status.textColor = [UIColor colorWithWhite:0 alpha:0.6];
+    status.text = @"长按文字开始选中";
+
+    __weak typeof(self) weakSelf = self;
+    __weak ZLTagRichLabel *weakLabel = label;
+    __weak UILabel *weakStatus = status;
+    [label update:^(ZLRichLabel *base) {
+        ZLTagRichLabel *v = (ZLTagRichLabel *)base;
+        v.style = OCDemoViewController.baseStyle;
+        v.isSelectable = YES;
+        v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
+        v.onTagTap = ^(HTagInfo *info) { [weakSelf onTap:name info:info action:nil]; };
+        // 表情：选中后「复制」得到空（图片），「复制原文」得到 [smile]
+        [v addRuleWithName:@"emoji" pattern:@"\\[smile\\]" options:0 priority:0 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            NSTextAttachment *attachment = [[NSTextAttachment alloc] init];
+            attachment.image = [[UIImage systemImageNamed:@"face.smiling"] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+            attachment.bounds = CGRectMake(0, 0, 17, 17);
+            NSMutableAttributedString *content = [[NSAttributedString attributedStringWithAttachment:attachment] mutableCopy];
+            [content addAttributes:@{NSForegroundColorAttributeName: kOrange} range:NSMakeRange(0, content.length)];
+            [ctx.attributedString setAttributedString:content];
+        }];
+        // @提及：展示为 👤alice，原文为 @alice（长按命中时整体选中）
+        [v addRuleWithName:@"mention" pattern:@"@\\w+" options:0 priority:0 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            [ctx setText:[@"👤" stringByAppendingString:[ctx.matchedText substringFromIndex:1]]
+              attributes:@{NSForegroundColorAttributeName: kPurple}];
+        }];
+        v.onSelectionChanged = ^(NSRange range) {
+            ZLTagRichLabel *strongLabel = weakLabel;
+            if (!strongLabel) { return; }
+            weakStatus.text = range.location == NSNotFound ? @"未选中" : [NSString stringWithFormat:
+                @"selectedRange   = {%lu, %lu}\nselectedText    = \"%@\"\nselectedRawText = \"%@\"",
+                (unsigned long)range.location, (unsigned long)range.length,
+                strongLabel.selectedText ?: @"", strongLabel.selectedRawText ?: @""];
+        };
+        v.onCopy = ^(NSString *text, BOOL isRaw) {
+            HTagInfo *info = [[HTagInfo alloc] initWithIndex:0 name:isRaw ? @"copy-raw" : @"copy" text:text raw:@""];
+            [weakSelf onTap:name info:info action:isRaw ? @"onCopy → 复制原文" : @"onCopy → 复制展示文字"];
+        };
+        v.text = source;
+    }];
+
+    UIStackView *content = [[UIStackView alloc] initWithArrangedSubviews:@[label, status]];
+    content.axis = UILayoutConstraintAxisVertical;
+    content.spacing = 8;
+    OCDemoCard *card = [[OCDemoCard alloc] initWithTitle:name source:source content:content];
+    self.cards[name] = card;
+    [self.stackView addArrangedSubview:card];
 }
 
 #pragma mark - 长按 / 双击 / 扩大点击热区
