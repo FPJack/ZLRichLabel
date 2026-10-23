@@ -47,6 +47,39 @@ public final class ZLRichSegment: NSObject {
 /// }
 /// label.text = "hello @alice"
 /// ```
+/// 长按 / 双击的位置信息
+@objcMembers
+public final class ZLRichGestureInfo: NSObject {
+    /// 手势位置（label 坐标系）
+    public let location: CGPoint
+    /// 手势位置对应的字符下标（展示文字中），不在文字上时为 `NSNotFound`
+    public let characterIndex: Int
+    /// 手势位置所在的规则命中，不在命中上时为 nil
+    public let match: TagRichMatch?
+    /// 命中在 label 上展示的文字（规则可能替换过文字），不在命中上时为 nil
+    public let matchDisplayText: String?
+    /// 原始字符串（`rawText`）
+    public let rawText: String
+    /// 展示文字（渲染后的文字，自定义 View / 图片为占位符 U+FFFC）
+    public let displayText: String
+
+    init(location: CGPoint, characterIndex: Int, match: TagRichMatch?, matchDisplayText: String?,
+         rawText: String, displayText: String) {
+        self.location = location
+        self.characterIndex = characterIndex
+        self.match = match
+        self.matchDisplayText = matchDisplayText
+        self.rawText = rawText
+        self.displayText = displayText
+        super.init()
+    }
+
+    public override var description: String {
+        return "ZLRichGestureInfo(location: \(location), characterIndex: \(characterIndex), "
+            + "match: \(match?.description ?? "nil"), matchDisplayText: \(matchDisplayText ?? "nil"))"
+    }
+}
+
 /// 渲染 / 排版统计，用于观察缓存效果（调试用，数值只增不减，可调用 `reset()` 清零）
 @objcMembers
 public final class ZLRichLabelStatistics: NSObject {
@@ -168,6 +201,28 @@ open class ZLRichLabel: TTTAttributedLabel {
 
     /// 「展开」按钮的可点击区域（label 坐标系，已适当扩大），没有显示时为 `.zero`
     public private(set) var expandTokenRect: CGRect = .zero
+
+    // MARK: 长按 / 双击
+
+    /// 长按回调（例如弹出「复制 / 举报」菜单）。长按位置所在的命中设置了 `ctx.onLongPress` 时只回调后者。
+    /// 长按会取消按下高亮和点击，不会同时触发 `onTap`
+    open var onLongPress: ((ZLRichGestureInfo) -> Void)?
+
+    /// 双击回调。设置后单击链接要等双击判定失败才触发（约 0.3 秒延迟），不需要时请保持为 nil
+    open var onDoubleTap: ((ZLRichGestureInfo) -> Void)? {
+        didSet { updateDoubleTapGesture() }
+    }
+
+    /// 长按手势（可调整 `minimumPressDuration` 等）
+    public private(set) lazy var richLongPressGesture: UILongPressGestureRecognizer = {
+        let gesture = UILongPressGestureRecognizer(target: self, action: #selector(handleRichLongPress(_:)))
+        gesture.minimumPressDuration = 0.5
+        gesture.delegate = gestureDelegate
+        return gesture
+    }()
+
+    /// 双击手势，`onDoubleTap` 为 nil 时为 nil
+    public private(set) var richDoubleTapGesture: UITapGestureRecognizer?
 
     /// 切换展开状态并回调 `onExpandChanged`，与点击「展开 / 收起」的效果相同
     open func toggleExpanded() {
@@ -303,20 +358,26 @@ open class ZLRichLabel: TTTAttributedLabel {
         let text: String
         let content: NSAttributedString
         let onTap: (() -> Void)?
+        let onLongPress: (() -> Void)?
         let highlightStyle: HTagTextStyle?
         let attachments: [Attachment]
 
-        init(match: TagRichMatch, content: NSAttributedString, onTap: (() -> Void)?,
+        init(match: TagRichMatch, content: NSAttributedString, onTap: (() -> Void)?, onLongPress: (() -> Void)?,
              highlightStyle: HTagTextStyle?, attachments: [Attachment]) {
+            self.matchInfo = match
             self.rule = match.rule
             self.range = match.range
             self.index = match.index
             self.text = match.text
             self.content = content
             self.onTap = onTap
+            self.onLongPress = onLongPress
             self.highlightStyle = highlightStyle
             self.attachments = attachments
         }
+
+        /// 生成这份结果的命中（复用时规则 / 位置 / 序号 / 文字都相同）
+        let matchInfo: TagRichMatch
 
         /// 同一条规则、同一位置、同一序号、同样的文字才能复用
         func isValid(for match: TagRichMatch) -> Bool {
@@ -332,6 +393,9 @@ open class ZLRichLabel: TTTAttributedLabel {
 
     /// 命中的渲染缓存：文本变化只重新渲染变化的命中；样式等配置变化时按范围作废
     private var renderCache: [RenderKey: RenderedMatch] = [:]
+
+    /// 每个命中在展示文字（attributedText）中的范围，按位置排序，用于手势定位
+    private var displayMatches: [(range: NSRange, rendered: RenderedMatch)] = []
 
     /// 排版缓存：同一份 attributedText 只创建一次 CTFramesetter，
     /// 按「宽度 + 行数」缓存 sizeThatFits 结果，按 textRect 缓存 CTFrame 的行与原点
@@ -597,6 +661,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         var linkItems: [(NSRange, HTagTextStyle?, () -> Void)] = []
         var nextCache: [RenderKey: RenderedMatch] = [:]
         var live: [Int: Attachment] = [:]
+        var nextDisplayMatches: [(range: NSRange, rendered: RenderedMatch)] = []
 
         for seg in segments {
             guard let match = seg.match else {
@@ -617,11 +682,13 @@ open class ZLRichLabel: TTTAttributedLabel {
 
             let range = NSRange(location: result.length, length: rendered.content.length)
             result.append(rendered.content)
+            if range.length > 0 { nextDisplayMatches.append((range, rendered)) }
             if let onTap = rendered.onTap, range.length > 0 {
                 linkItems.append((range, rendered.highlightStyle, onTap))
             }
         }
         renderCache = nextCache
+        displayMatches = nextDisplayMatches
 
         // 移除不再使用的 View（同一个 View 可能被新的命中复用，不能误删）
         let liveViews = Set(live.values.map { ObjectIdentifier($0.view) })
@@ -692,6 +759,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         attachments.values.forEach { $0.view.removeFromSuperview() }
         attachments.removeAll()
         renderCache.removeAll()
+        displayMatches = []
     }
 
     /// 执行规则 handler，生成单个命中的渲染结果
@@ -720,6 +788,7 @@ open class ZLRichLabel: TTTAttributedLabel {
         return RenderedMatch(match: match,
                              content: NSAttributedString(attributedString: content),
                              onTap: onTap,
+                             onLongPress: context.onLongPress,
                              highlightStyle: context.highlightStyle,
                              attachments: created)
     }
@@ -1137,14 +1206,147 @@ open class ZLRichLabel: TTTAttributedLabel {
         return styled
     }
 
-    private lazy var expandGestureDelegate = ExpandGestureDelegate(label: self)
+    private lazy var gestureDelegate = RichGestureDelegate(label: self)
+    private var expandTapGesture: UITapGestureRecognizer?
 
     private func setupExpandGesture() {
+        // TTT 自带的长按只作用于链接且需要 delegate，这里统一由 richLongPressGesture 处理
+        longPressGestureRecognizer?.isEnabled = false
+        addGestureRecognizer(richLongPressGesture)
+
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleExpandTap(_:)))
-        tap.delegate = expandGestureDelegate
+        tap.delegate = gestureDelegate
+        expandTapGesture = tap
         // 只接收「展开」按钮区域内的触摸；延迟下发，避免按钮下方被截断的链接先出现按下高亮
         tap.delaysTouchesBegan = true
         addGestureRecognizer(tap)
+    }
+
+    private func updateDoubleTapGesture() {
+        if onDoubleTap == nil {
+            if let gesture = richDoubleTapGesture { removeGestureRecognizer(gesture) }
+            richDoubleTapGesture = nil
+            return
+        }
+        guard richDoubleTapGesture == nil else { return }
+        let gesture = UITapGestureRecognizer(target: self, action: #selector(handleRichDoubleTap(_:)))
+        gesture.numberOfTapsRequired = 2
+        gesture.delegate = gestureDelegate
+        // 默认 delaysTouchesEnded = true：双击成功时取消链接点击，失败后再交给链接
+        addGestureRecognizer(gesture)
+        expandTapGesture?.require(toFail: gesture)
+        richDoubleTapGesture = gesture
+    }
+
+    @objc private func handleRichLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        let location = gesture.location(in: self)
+        if let item = displayMatch(at: location), let handler = item.rendered.onLongPress {
+            handler()
+            return
+        }
+        onLongPress?(gestureInfo(at: location))
+    }
+
+    @objc private func handleRichDoubleTap(_ gesture: UITapGestureRecognizer) {
+        guard gesture.state == .ended else { return }
+        onDoubleTap?(gestureInfo(at: gesture.location(in: self)))
+    }
+
+    /// 长按是否需要开始：有 `onLongPress` 或该位置的命中设置了 `ctx.onLongPress`
+    fileprivate func shouldBeginLongPress(at location: CGPoint) -> Bool {
+        if onLongPress != nil { return true }
+        return displayMatch(at: location)?.rendered.onLongPress != nil
+    }
+
+    // MARK: 按坐标定位
+
+    /// 某个位置的手势信息（字符下标、所在命中等）
+    @objc(gestureInfoAtPoint:)
+    open func gestureInfo(at point: CGPoint) -> ZLRichGestureInfo {
+        let index = characterIndex(at: point)
+        let item = displayMatch(at: point)
+        let display = (attributedText?.string ?? "") as NSString
+        let matchText = item.map { NSMaxRange($0.range) <= display.length ? display.substring(with: $0.range) : "" }
+        return ZLRichGestureInfo(location: point, characterIndex: index, match: item?.rendered.matchInfo,
+                                 matchDisplayText: matchText, rawText: rawText, displayText: display as String)
+    }
+
+    /// 某个位置所在的规则命中，不在命中上时为 nil。
+    /// `extendsLinkTouchArea` 为 true 时，可交互的命中（有 onTap / onLongPress）点击区域向四周扩大最多 15pt
+    @objc(matchAtPoint:)
+    open func match(at point: CGPoint) -> TagRichMatch? {
+        return displayMatch(at: point)?.rendered.matchInfo
+    }
+
+    private func displayMatch(at point: CGPoint) -> (range: NSRange, rendered: RenderedMatch)? {
+        if let item = displayMatch(atCharacter: characterIndex(at: point)) { return item }
+        guard extendsLinkTouchArea else { return nil }
+        // 与 TTTAttributedLabel.linkAtPoint 一致：由近到远在 8 个方向上查找可交互的命中
+        for radius: CGFloat in [2.5, 5, 7.5, 12.5, 15] {
+            let diagonal = (2 * radius * radius).squareRoot()
+            let deltas = [CGPoint(x: 0, y: -radius), CGPoint(x: 0, y: radius), CGPoint(x: -radius, y: 0),
+                          CGPoint(x: radius, y: 0), CGPoint(x: -diagonal, y: -diagonal), CGPoint(x: -diagonal, y: diagonal),
+                          CGPoint(x: diagonal, y: diagonal), CGPoint(x: diagonal, y: -diagonal)]
+            for delta in deltas {
+                let candidate = CGPoint(x: point.x + delta.x, y: point.y + delta.y)
+                if let item = displayMatch(atCharacter: characterIndex(at: candidate)),
+                   item.rendered.onTap != nil || item.rendered.onLongPress != nil {
+                    return item
+                }
+            }
+        }
+        return nil
+    }
+
+    private func displayMatch(atCharacter index: Int) -> (range: NSRange, rendered: RenderedMatch)? {
+        guard index != NSNotFound else { return nil }
+        // displayMatches 按位置排序：二分查找
+        var low = 0
+        var high = displayMatches.count - 1
+        while low <= high {
+            let mid = (low + high) / 2
+            let range = displayMatches[mid].range
+            if index < range.location { high = mid - 1 } else if index >= NSMaxRange(range) { low = mid + 1 } else {
+                return displayMatches[mid]
+            }
+        }
+        return nil
+    }
+
+    /// 某个位置对应的字符下标（展示文字中），不在文字上时返回 `NSNotFound`。
+    /// 与 TTTAttributedLabel 的绘制位置一致（对齐方式、内边距、行数限制）
+    @objc(characterIndexAtPoint:)
+    open func characterIndex(at point: CGPoint) -> Int {
+        guard let attr = attributedText, attr.length > 0, bounds.contains(point) else { return NSNotFound }
+        let lineLimit = numberOfLines
+        let textRect = self.textRect(forBounds: bounds, limitedToNumberOfLines: lineLimit)
+        let (lines, origins) = frameLines(for: attr, in: textRect)
+        guard !lines.isEmpty else { return NSNotFound }
+        let count = lineLimit > 0 ? min(lineLimit, lines.count) : lines.count
+        let fontDescender = (font ?? UIFont.systemFont(ofSize: 17)).descender
+        let width = Double(textRect.width)
+
+        for lineIndex in 0..<count {
+            let line = lines[lineIndex]
+            var ascent: CGFloat = 0
+            var descent: CGFloat = 0
+            var leading: CGFloat = 0
+            let lineWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+            let baselineY = textRect.minY + textRect.height - (origins[lineIndex].y - descent - fontDescender)
+            if point.y < baselineY - ascent { return NSNotFound }     // 在这一行上方（行间距）
+            if point.y > baselineY + descent + leading { continue }  // 在这一行下方
+            let penOffset = CGFloat(CTLineGetPenOffsetForFlush(line, flushFactor, width))
+            let x = point.x - textInsets.left - penOffset
+            guard x >= 0, x <= lineWidth else { return NSNotFound }
+            var index = CTLineGetStringIndexForPosition(line, CGPoint(x: x, y: 0))
+            guard index != kCFNotFound else { return NSNotFound }
+            // 返回的是离该位置最近的插入点：位置在字符左半边时插入点在字符后面，需要回退一位
+            let lineRange = CTLineGetStringRange(line)
+            if index > lineRange.location, CTLineGetOffsetForStringIndex(line, index, nil) > x { index -= 1 }
+            return min(index, attr.length - 1)
+        }
+        return NSNotFound
     }
 
     @objc private func handleExpandTap(_ gesture: UITapGestureRecognizer) {
@@ -1274,8 +1476,10 @@ public extension UIView {
     }
 }
 
-/// 「展开」点击手势的代理：只接收按钮区域内的触摸，其他位置交给 TTTAttributedLabel 处理链接
-private final class ExpandGestureDelegate: NSObject, UIGestureRecognizerDelegate {
+/// label 自己添加的手势的代理（TTTAttributedLabel 自身是它的长按手势的代理，这里单独处理）：
+/// - 「展开」点击：只接收按钮区域内的触摸，其他位置交给 TTTAttributedLabel 处理链接
+/// - 长按：有 `onLongPress` 或该位置的命中设置了 `ctx.onLongPress` 时才开始
+private final class RichGestureDelegate: NSObject, UIGestureRecognizerDelegate {
     weak var label: ZLRichLabel?
 
     init(label: ZLRichLabel) {
@@ -1284,8 +1488,20 @@ private final class ExpandGestureDelegate: NSObject, UIGestureRecognizerDelegate
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        guard let label = label, !label.isExpanded, label.expandTokenRect != .zero else { return false }
+        guard let label = label else { return false }
+        if gestureRecognizer === label.richLongPressGesture || gestureRecognizer === label.richDoubleTapGesture {
+            return true
+        }
+        guard !label.isExpanded, label.expandTokenRect != .zero else { return false }
         return label.expandTokenRect.contains(touch.location(in: label))
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let label = label else { return false }
+        if gestureRecognizer === label.richLongPressGesture {
+            return label.shouldBeginLongPress(at: gestureRecognizer.location(in: label))
+        }
+        return true
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,

@@ -125,6 +125,9 @@ public final class TagRichRuleContext: NSObject {
     /// 点击回调，设置后整段内容可点击（含其中的图片 / tappable 的 View）
     public var onTap: (() -> Void)?
 
+    /// 长按回调（例如弹出「复制 / 举报」菜单）。设置后长按这段内容时只回调它，不再回调 `ZLRichLabel.onLongPress`
+    public var onLongPress: (() -> Void)?
+
     /// 按下高亮样式，nil 时使用 `ZLRichLabel.highlightStyle`；`[:]` 表示不高亮
     public var highlightStyle: HTagTextStyle?
 

@@ -219,6 +219,9 @@ open class ZLTagRichLabel: ZLRichLabel {
     /// `onTagTap` 和 `tagTapHandlers` 都没有处理的标签不可点击
     open var onTagTap: HTagTapCallback? { didSet { setNeedsTagRebuild() } }
 
+    /// 长按标签（例如弹出「复制链接」菜单）。设置后长按标签只回调它，长按其他位置回调基类的 `onLongPress`
+    open var onTagLongPress: HTagTapCallback? { didSet { setNeedsTagRebuild() } }
+
     /// 解析完成后把所有标签信息回调给外部（文本或规则变化时回调）
     open var onParsed: (([HTagInfo]) -> Void)?
 
@@ -324,6 +327,9 @@ open class ZLTagRichLabel: ZLRichLabel {
         if isTappable(info) {
             context.onTap = { [weak self] in self?.dispatchTap(info) }
             context.highlightStyle = tagHighlightStyles[info.name]
+        }
+        if onTagLongPress != nil {
+            context.onLongPress = { [weak self] in self?.onTagLongPress?(info) }
         }
 
         // 1. 完全自定义

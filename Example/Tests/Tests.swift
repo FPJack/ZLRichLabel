@@ -498,3 +498,131 @@ class ExpandCollapseTests: XCTestCase {
         XCTAssertEqual(label.links.count, 1)
     }
 }
+
+/// 长按 / 双击 / 按坐标定位 / 扩大点击热区
+class GestureTests: XCTestCase {
+
+    private var window: UIWindow!
+
+    override func setUp() {
+        super.setUp()
+        window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        window.isHidden = false
+    }
+
+    override func tearDown() {
+        window.isHidden = true
+        window = nil
+        super.tearDown()
+    }
+
+    private func makeLabel(lineSpacing: CGFloat = 0) -> ZLRichLabel {
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: 200, height: 0))
+        label.numberOfLines = 0
+        label.update { v in
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineSpacing = lineSpacing
+            v.style = [.font: UIFont.systemFont(ofSize: 15), .paragraphStyle: paragraph]
+            try? v.addRule(name: "mention", pattern: "@\\w+") { ctx in
+                ctx.setText("👤" + ctx.matchedText.dropFirst(), attributes: [.foregroundColor: UIColor.purple])
+                ctx.onTap = {}
+            }
+            v.text = "Hi @alice, this is a long sentence that wraps onto the next line for testing."
+        }
+        window.addSubview(label)
+        let size = label.sizeThatFits(CGSize(width: 200, height: CGFloat.greatestFiniteMagnitude))
+        label.frame = CGRect(x: 0, y: 0, width: 200, height: size.height)
+        label.layoutIfNeeded()
+        return label
+    }
+
+    /// 扫描整个 label，返回第一个落在命中上的点
+    private func pointOnMatch(_ label: ZLRichLabel) -> CGPoint? {
+        for y in stride(from: CGFloat(1), to: label.bounds.height, by: 2) {
+            for x in stride(from: CGFloat(1), to: label.bounds.width, by: 2) {
+                let p = CGPoint(x: x, y: y)
+                if label.match(at: p) != nil { return p }
+            }
+        }
+        return nil
+    }
+
+    func testCharacterIndexAndMatchAtPoint() {
+        let label = makeLabel()
+        let display = label.attributedText.string as NSString
+        var sawPlain = false
+        for y in stride(from: CGFloat(1), to: label.bounds.height, by: 3) {
+            for x in stride(from: CGFloat(1), to: label.bounds.width, by: 3) {
+                let p = CGPoint(x: x, y: y)
+                let index = label.characterIndex(at: p)
+                guard index != NSNotFound else { continue }
+                XCTAssertLessThan(index, display.length)
+                let info = label.gestureInfo(at: p)
+                XCTAssertEqual(info.characterIndex, index)
+                if let match = info.match {
+                    XCTAssertEqual(match.text, "@alice")
+                    XCTAssertEqual(info.matchDisplayText, "👤alice", "展示文字是规则替换后的内容")
+                } else {
+                    sawPlain = true
+                }
+            }
+        }
+        XCTAssertNotNil(pointOnMatch(label), "应能定位到 @alice")
+        XCTAssertTrue(sawPlain)
+
+        // 第一个字符在左上角
+        XCTAssertEqual(label.characterIndex(at: CGPoint(x: 2, y: 8)), 0)
+        // 超出 bounds
+        XCTAssertEqual(label.characterIndex(at: CGPoint(x: -5, y: 5)), NSNotFound)
+
+        let info = label.gestureInfo(at: CGPoint(x: 2, y: 8))
+        XCTAssertNil(info.match)
+        XCTAssertEqual(info.rawText, label.rawText)
+        XCTAssertEqual(info.displayText, label.attributedText.string)
+    }
+
+    func testExtendsLinkTouchArea() {
+        let label = makeLabel(lineSpacing: 12)
+        guard let onMatch = pointOnMatch(label) else { return XCTFail("没有找到 @alice") }
+        // 从命中处往下移动，找到第一个落在行间距里（不在文字上）的点
+        var gapPoint: CGPoint?
+        for dy in stride(from: CGFloat(1), through: 40, by: 1) {
+            let p = CGPoint(x: onMatch.x, y: onMatch.y + dy)
+            if label.characterIndex(at: p) == NSNotFound { gapPoint = p; break }
+        }
+        guard let gap = gapPoint else { return XCTFail("没有找到行间距中的点") }
+
+        label.extendsLinkTouchArea = false
+        XCTAssertNil(label.match(at: gap))
+        label.extendsLinkTouchArea = true
+        XCTAssertEqual(label.match(at: gap)?.text, "@alice", "扩大热区后行间距中的点也能定位到附近的可点击命中")
+    }
+
+    func testGestureSetup() {
+        let label = makeLabel()
+        XCTAssertFalse(label.longPressGestureRecognizer.isEnabled, "TTT 自带的长按被替换")
+        XCTAssertTrue(label.gestureRecognizers?.contains(label.richLongPressGesture) ?? false)
+        XCTAssertNil(label.richDoubleTapGesture)
+
+        label.onDoubleTap = { _ in }
+        let doubleTap = label.richDoubleTapGesture
+        XCTAssertNotNil(doubleTap)
+        XCTAssertEqual(doubleTap?.numberOfTapsRequired, 2)
+        XCTAssertTrue(label.gestureRecognizers?.contains { $0 === doubleTap } ?? false)
+
+        label.onDoubleTap = nil
+        XCTAssertNil(label.richDoubleTapGesture)
+        XCTAssertFalse(label.gestureRecognizers?.contains { $0 === doubleTap } ?? true, "不需要双击时移除，避免延迟单击")
+    }
+
+    func testMatchesStayLocatableAfterCachedRender() {
+        let label = makeLabel()
+        guard let p = pointOnMatch(label) else { return XCTFail() }
+        label.highlightStyle = [.backgroundColor: UIColor.yellow] // 复用缓存重新渲染
+        label.layoutIfNeeded()
+        XCTAssertEqual(label.match(at: p)?.text, "@alice")
+        label.text = "plain"
+        label.layoutIfNeeded()
+        XCTAssertNil(label.match(at: p))
+    }
+}

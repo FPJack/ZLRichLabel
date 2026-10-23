@@ -41,6 +41,7 @@ Swift 与 Objective-C 均可使用，基于 [TTTAttributedLabel](https://github.
 - 容错：开闭不匹配、未闭合的标签原样显示，不影响后面的标签
 - 多行截断（自定义省略符）、Auto Layout 自适应高度
 - 展开 / 收起：截断时末尾显示可点击的「… 全文」，展开后显示「收起」
+- 长按（整体 / 按命中 / 按标签）、双击、扩大点击热区，可按坐标查询字符和命中
 - 渲染缓存 + 排版缓存：改样式 / 追加文字时只重新处理变化的部分
 - RTL：阿拉伯语 / 希伯来语等从右到左文本自动右对齐，支持双向混排
 - 深色模式自动重新渲染；可选支持 Dynamic Type（系统文字大小）
@@ -153,6 +154,7 @@ handler 通过 `ctx` 读取命中信息，并写入要展示的内容：
 | `setText(_:attributes:)` | 用新文字替换（默认带 baseStyle） |
 | `attachmentString(for:style:)` | 生成自定义 View 的占位富文本，拼进 `attributedString` 即可在该位置显示 View |
 | `onTap` | 设置后整段可点击（含其中的图片和 `tappable` 的 View） |
+| `onLongPress` | 长按这段内容时回调（设置后不再回调 label 的 `onLongPress`） |
 | `highlightStyle` | 按下高亮，`nil` 使用 label 的 `highlightStyle`，`[:]` 不高亮 |
 
 插入图片：直接放 `NSTextAttachment` 即可，组件会自动转换成 `UIImageView` 显示（TTTAttributedLabel 本身不绘制 attachment）：
@@ -359,6 +361,54 @@ HTagParser.tags("<h1>a</h1>")        // 独立解析，不创建 label
 
 xib / storyboard 中设置的文字同样会被解析。
 
+## 长按 / 双击 / 点击热区
+
+```swift
+// 长按：其他位置弹出「复制 / 举报」菜单
+label.onLongPress = { info in
+    // info.location / characterIndex / match / matchDisplayText / rawText / displayText
+    UIPasteboard.general.string = info.rawText
+}
+
+// 某条规则的命中单独处理长按（设置后长按它不再回调 label.onLongPress）
+try? label.addRule(name: "mention", pattern: "@\\w+") { ctx in
+    let user = ctx.matchedText
+    ctx.onTap = { openProfile(user) }
+    ctx.onLongPress = { showMenu(for: user) }
+}
+
+// ZLTagRichLabel：长按标签
+tagLabel.onTagLongPress = { info in UIPasteboard.general.string = info.text }
+
+// 双击
+label.onDoubleTap = { info in like() }
+
+// 点击热区向四周扩大最多 15pt（TTTAttributedLabel 的属性，对 match(at:) 同样生效）
+label.extendsLinkTouchArea = true
+```
+
+| API | 说明 |
+| --- | --- |
+| `onLongPress` | 长按回调，参数为 `ZLRichGestureInfo`。长按会取消按下高亮和点击 |
+| `ctx.onLongPress` / `onTagLongPress` | 命中 / 标签自己的长按，优先于 `onLongPress` |
+| `onDoubleTap` | 双击回调。**设置后单击链接要等双击判定失败才触发（约 0.3 秒）**，不需要时保持 nil |
+| `richLongPressGesture` / `richDoubleTapGesture` | 对应的手势，可调整 `minimumPressDuration` 等，也可用来定位菜单 |
+| `extendsLinkTouchArea` | 可点击内容的热区向四周扩大最多 15pt |
+| `characterIndex(at:)` | 某个位置在展示文字中的字符下标，不在文字上时为 `NSNotFound` |
+| `match(at:)` | 某个位置所在的规则命中 |
+| `gestureInfo(at:)` | 某个位置的完整信息（同 `ZLRichGestureInfo`） |
+
+`ZLRichGestureInfo`：
+
+| 属性 | 说明 |
+| --- | --- |
+| `location` | 手势位置（label 坐标系） |
+| `characterIndex` | 展示文字中的字符下标，不在文字上时为 `NSNotFound` |
+| `match` / `matchDisplayText` | 所在的规则命中，以及它在 label 上展示的文字（规则可能替换过） |
+| `rawText` / `displayText` | 原始字符串 / 渲染后的文字（图片和 View 为占位符 U+FFFC） |
+
+TTTAttributedLabel 自带的 `longPressGestureRecognizer` 只作用于链接且需要 delegate，已被禁用，统一使用 `richLongPressGesture`。
+
 ## 展开 / 收起
 
 内容超过 `numberOfLines` 行时，最后一行末尾显示 `expandToken`（代替省略符），点击后展开全部内容；展开后在末尾显示 `collapseToken`，点击恢复。
@@ -496,6 +546,8 @@ label.numberOfLines = 0;
 | `invalidateLayout(forAttachmentView:)` | `invalidateLayoutForAttachmentView:` |
 | `setNeedsRebuild(forRuleNamed:)` | `setNeedsRebuildForRuleNamed:` |
 | `onExpandChanged = { expanded in }` | `onExpandChanged = ^(BOOL expanded) {}` |
+| `onLongPress = { info in }` / `onDoubleTap` | `onLongPress = ^(ZLRichGestureInfo *info) {}` |
+| `characterIndex(at:)` / `match(at:)` / `gestureInfo(at:)` | `characterIndexAtPoint:` / `matchAtPoint:` / `gestureInfoAtPoint:` |
 
 ## Example
 
@@ -518,6 +570,7 @@ open ZLRichLabel.xcworkspace
 | 22 | 深色模式 / Dynamic Type：切换预览区域的外观与文字大小，文字、标签、规则内容和自定义 View 一起变化 |
 | 23 | 性能：600 个命中（含 200 张图片）的 label，对比改高亮 / 追加文字 / 只刷新一条规则 / `rebuild()` 的耗时与 handler 执行次数，`sizeThatFits` 缓存，1.5 万命中的解析耗时 |
 | 24 | 展开 / 收起：3 行截断显示「… 全文」，展开后显示「收起」；内容不足 3 行时不显示按钮 |
+| 25 | 长按菜单（复制原文 / 展示文字、举报）、@提及与标签各自的长按、双击点赞、扩大点击热区 |
 
 页面顶部会显示最近一次点击得到的完整信息，底部有点击历史。
 

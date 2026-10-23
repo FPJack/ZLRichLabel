@@ -542,6 +542,8 @@ static NSString *OCQuote(NSString *s) {
 @property (nonatomic, assign) BOOL mentionGreen23;
 @property (nonatomic, assign) BOOL highlightBlue23;
 @property (nonatomic, assign) NSInteger appended23;
+/// 用例 25：长按菜单从手势位置弹出
+@property (nonatomic, weak) ZLTagRichLabel *case25Label;
 @end
 
 @implementation OCDemoViewController
@@ -599,6 +601,8 @@ static NSString *OCQuote(NSString *s) {
     [self case23];
     // 展开 / 收起
     [self case24];
+    // 长按 / 双击 / 扩大点击热区
+    [self case25];
     [self.stackView addArrangedSubview:self.historyCard];
 
     [self refreshTapViews];
@@ -1335,6 +1339,111 @@ static NSString *OCQuote(NSString *s) {
 
 - (void)scaleSwitchChanged22:(UISwitch *)sender {
     self.case22Label.adjustsFontForContentSizeCategory = sender.isOn;
+}
+
+#pragma mark - 长按 / 双击 / 扩大点击热区
+
+/// 25. 长按菜单（复制 / 举报）、按命中区分的长按、双击、扩大点击热区
+- (void)case25 {
+    NSString *name = @"25. 长按菜单 / 双击 / 扩大点击热区";
+    NSString *source = @"Long press blank text to copy or report. Long press <h1>User Agreement</h1> or @alice "
+                       @"for their own menus, double tap to like ❤️. Tap slightly below @bob: extendsLinkTouchArea "
+                       @"expands the touch area by up to 15pt.";
+    __weak typeof(self) weakSelf = self;
+    self.case25Label = [self addCase:name source:source configure:^(ZLTagRichLabel *v) {
+        NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
+        paragraph.lineSpacing = 10;
+        NSMutableDictionary *style = [OCDemoViewController.baseStyle mutableCopy];
+        style[NSParagraphStyleAttributeName] = paragraph;
+        v.style = style;
+        v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
+        v.tagHighlightStyle = @{NSBackgroundColorAttributeName: [UIColor colorWithWhite:0 alpha:0.08]};
+        v.extendsLinkTouchArea = YES;
+
+        // 规则命中自己的长按：只回调它，不再回调 onLongPress
+        [v addRuleWithName:@"mention" pattern:@"@\\w+" options:0 priority:0 error:nil
+                   handler:^(TagRichRuleContext *ctx) {
+            [ctx addAttributes:@{NSForegroundColorAttributeName: kPurple,
+                                 NSFontAttributeName: [UIFont boldSystemFontOfSize:15]}];
+            NSString *user = ctx.matchedText;
+            HTagInfo *info = [[HTagInfo alloc] initWithIndex:ctx.match.index name:@"rule:mention" text:user raw:user];
+            ctx.onTap = ^{
+                [weakSelf onTap:name info:info action:[NSString stringWithFormat:@"mention onTap → 打开 %@ 的主页", user]];
+            };
+            ctx.onLongPress = ^{
+                [weakSelf showMenu25:user items:@[
+                    @[[NSString stringWithFormat:@"复制 %@", user], ^{ [weakSelf copy25:user caseName:name info:info]; }],
+                    @[[NSString stringWithFormat:@"举报 %@", user], ^{
+                        [weakSelf onTap:name info:info action:[NSString stringWithFormat:@"ctx.onLongPress → 举报 %@", user]];
+                    }],
+                ]];
+            };
+        }];
+        // 标签的长按
+        v.onTagLongPress = ^(HTagInfo *info) {
+            [weakSelf showMenu25:[NSString stringWithFormat:@"<%@> %@", info.name, info.text] items:@[
+                @[[NSString stringWithFormat:@"复制「%@」", info.text], ^{ [weakSelf copy25:info.text caseName:name info:info]; }],
+            ]];
+        };
+        // 其他位置的长按：复制原文 / 展示文字、举报
+        v.onLongPress = ^(ZLRichGestureInfo *gesture) {
+            HTagInfo *info = [[HTagInfo alloc] initWithIndex:gesture.characterIndex name:@"long-press"
+                                                        text:gesture.displayText raw:gesture.rawText];
+            [weakSelf showMenu25:[NSString stringWithFormat:@"长按位置字符下标：%ld", (long)gesture.characterIndex] items:@[
+                @[@"复制原文（rawText）", ^{ [weakSelf copy25:gesture.rawText caseName:name info:info]; }],
+                @[@"复制展示文字（displayText）", ^{ [weakSelf copy25:gesture.displayText caseName:name info:info]; }],
+                @[@"举报", ^{ [weakSelf onTap:name info:info action:@"onLongPress → 举报"]; }],
+            ]];
+        };
+        // 双击：设置后单击链接会等双击判定失败才触发（约 0.3 秒）
+        v.onDoubleTap = ^(ZLRichGestureInfo *gesture) {
+            OCDemoViewController *strongSelf = weakSelf;
+            ZLTagRichLabel *label = strongSelf.case25Label;
+            if (!strongSelf || !label) { return; }
+            HTagInfo *info = [[HTagInfo alloc] initWithIndex:gesture.characterIndex name:@"double-tap"
+                                                        text:gesture.matchDisplayText ?: @"" raw:gesture.match.text ?: @""];
+            [strongSelf onTap:name info:info action:[NSString stringWithFormat:@"onDoubleTap → 点赞 ❤️（位置 %d, %d）",
+                                                     (int)gesture.location.x, (int)gesture.location.y]];
+            [strongSelf showHeart25In:label at:gesture.location];
+        };
+    }];
+}
+
+/// 在长按位置弹出菜单（iPad 上以 popover 显示）。items：@[@[标题, block], ...]
+- (void)showMenu25:(NSString *)title items:(NSArray<NSArray *> *)items {
+    ZLTagRichLabel *label = self.case25Label;
+    if (!label) { return; }
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:title message:nil
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSArray *item in items) {
+        void (^action)(void) = item[1];
+        [sheet addAction:[UIAlertAction actionWithTitle:item[0] style:UIAlertActionStyleDefault
+                                                handler:^(UIAlertAction *a) { action(); }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    CGPoint location = [label.richLongPressGesture locationInView:label];
+    sheet.popoverPresentationController.sourceView = label;
+    sheet.popoverPresentationController.sourceRect = CGRectMake(location.x, location.y, 1, 1);
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)copy25:(NSString *)text caseName:(NSString *)caseName info:(HTagInfo *)info {
+    UIPasteboard.generalPasteboard.string = text;
+    NSString *shown = text.length > 40 ? [[text substringToIndex:40] stringByAppendingString:@"…"] : text;
+    [self onTap:caseName info:info action:[NSString stringWithFormat:@"已复制：%@", shown]];
+}
+
+- (void)showHeart25In:(UIView *)label at:(CGPoint)point {
+    UILabel *heart = [[UILabel alloc] init];
+    heart.text = @"❤️";
+    heart.font = [UIFont systemFontOfSize:28];
+    [heart sizeToFit];
+    heart.center = point;
+    [label addSubview:heart];
+    [UIView animateWithDuration:0.6 animations:^{
+        heart.transform = CGAffineTransformTranslate(CGAffineTransformMakeScale(1.6, 1.6), 0, -12);
+        heart.alpha = 0;
+    } completion:^(BOOL finished) { [heart removeFromSuperview]; }];
 }
 
 #pragma mark - 展开 / 收起

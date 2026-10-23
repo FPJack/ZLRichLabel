@@ -54,6 +54,8 @@ final class HTagDemoPage: UIViewController {
     private var mentionPurple23 = true
     private var highlightYellow23 = true
     private var appended23 = 0
+    /// 用例 25：长按菜单从手势位置弹出
+    private weak var case25Label: ZLTagRichLabel?
 
     private static let baseStyle: HTagTextStyle = [
         .font: UIFont.systemFont(ofSize: 15),
@@ -99,6 +101,8 @@ final class HTagDemoPage: UIViewController {
         case23()
         // 展开 / 收起
         case24()
+        // 长按 / 双击 / 扩大点击热区
+        case25()
         stackView.addArrangedSubview(historyCard)
 
         refreshTapViews()
@@ -785,6 +789,94 @@ final class HTagDemoPage: UIViewController {
 
     @objc private func scaleSwitchChanged22(_ sender: UISwitch) {
         case22Label?.adjustsFontForContentSizeCategory = sender.isOn
+    }
+
+    // MARK: - 长按 / 双击 / 扩大点击热区
+
+    /// 25. 长按菜单（复制 / 举报）、按命中区分的长按、双击、扩大点击热区
+    private func case25() {
+        let name = "25. 长按菜单 / 双击 / 扩大点击热区"
+        let source = "Long press blank text to copy or report. Long press <h1>User Agreement</h1> or @alice "
+            + "for their own menus, double tap to like ❤️. Tap slightly below @bob: extendsLinkTouchArea "
+            + "expands the touch area by up to 15pt."
+        case25Label = addCase(name, source: source) { v in
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineSpacing = 10
+            v.style = HTagDemoPage.baseStyle.merging([.paragraphStyle: paragraph]) { $1 }
+            v.tagStyle = [.foregroundColor: UIColor.mBlue]
+            v.tagHighlightStyle = [.backgroundColor: UIColor(white: 0, alpha: 0.08)]
+            v.extendsLinkTouchArea = true
+
+            // 规则命中自己的长按：只回调它，不再回调 onLongPress
+            try? v.addRule(name: "mention", pattern: "@\\w+") { [weak self] ctx in
+                ctx.addAttributes([.foregroundColor: UIColor.mPurple, .font: UIFont.boldSystemFont(ofSize: 15)])
+                let user = ctx.matchedText
+                let info = HTagInfo(index: ctx.match.index, name: "rule:mention", text: user, raw: user)
+                ctx.onTap = { self?.onTap(name, info, action: "mention onTap → 打开 \(user) 的主页") }
+                ctx.onLongPress = {
+                    self?.showMenu25(title: user, items: [
+                        ("复制 \(user)", { self?.copy25(user, caseName: name, info: info) }),
+                        ("举报 \(user)", { self?.onTap(name, info, action: "ctx.onLongPress → 举报 \(user)") }),
+                    ])
+                }
+            }
+            // 标签的长按
+            v.onTagLongPress = { [weak self] info in
+                self?.showMenu25(title: "<\(info.name)> \(info.text)", items: [
+                    ("复制「\(info.text)」", { self?.copy25(info.text, caseName: name, info: info) }),
+                ])
+            }
+            // 其他位置的长按：复制原文 / 展示文字、举报
+            v.onLongPress = { [weak self] gesture in
+                let info = HTagInfo(index: gesture.characterIndex, name: "long-press",
+                                    text: gesture.displayText, raw: gesture.rawText)
+                self?.showMenu25(title: "长按位置字符下标：\(gesture.characterIndex)", items: [
+                    ("复制原文（rawText）", { self?.copy25(gesture.rawText, caseName: name, info: info) }),
+                    ("复制展示文字（displayText）", { self?.copy25(gesture.displayText, caseName: name, info: info) }),
+                    ("举报", { self?.onTap(name, info, action: "onLongPress → 举报") }),
+                ])
+            }
+            // 双击：设置后单击链接会等双击判定失败才触发（约 0.3 秒）
+            v.onDoubleTap = { [weak self] gesture in
+                guard let self = self, let label = self.case25Label else { return }
+                let info = HTagInfo(index: gesture.characterIndex, name: "double-tap",
+                                    text: gesture.matchDisplayText ?? "", raw: gesture.match?.text ?? "")
+                self.onTap(name, info, action: "onDoubleTap → 点赞 ❤️（位置 \(Int(gesture.location.x)), \(Int(gesture.location.y))）")
+                self.showHeart25(in: label, at: gesture.location)
+            }
+        }
+    }
+
+    /// 在长按位置弹出菜单（iPad 上以 popover 显示）
+    private func showMenu25(title: String, items: [(String, () -> Void)]) {
+        guard let label = case25Label else { return }
+        let sheet = UIAlertController(title: title, message: nil, preferredStyle: .actionSheet)
+        for (itemTitle, action) in items {
+            sheet.addAction(UIAlertAction(title: itemTitle, style: .default) { _ in action() })
+        }
+        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        let location = label.richLongPressGesture.location(in: label)
+        sheet.popoverPresentationController?.sourceView = label
+        sheet.popoverPresentationController?.sourceRect = CGRect(origin: location, size: CGSize(width: 1, height: 1))
+        present(sheet, animated: true)
+    }
+
+    private func copy25(_ text: String, caseName: String, info: HTagInfo) {
+        UIPasteboard.general.string = text
+        onTap(caseName, info, action: "已复制：\(text.prefix(40))\(text.count > 40 ? "…" : "")")
+    }
+
+    private func showHeart25(in label: UIView, at point: CGPoint) {
+        let heart = UILabel()
+        heart.text = "❤️"
+        heart.font = .systemFont(ofSize: 28)
+        heart.sizeToFit()
+        heart.center = point
+        label.addSubview(heart)
+        UIView.animate(withDuration: 0.6, animations: {
+            heart.transform = CGAffineTransform(scaleX: 1.6, y: 1.6).translatedBy(x: 0, y: -12)
+            heart.alpha = 0
+        }, completion: { _ in heart.removeFromSuperview() })
     }
 
     // MARK: - 展开 / 收起
