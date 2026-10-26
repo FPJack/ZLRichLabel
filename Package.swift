@@ -3,7 +3,7 @@
 // Swift Package Manager 支持：
 //   Xcode › File › Add Package Dependencies… 输入 https://github.com/FPJack/ZLRichLabel.git
 // 或在 Package.swift 中：
-//   .package(url: "https://github.com/FPJack/ZLRichLabel.git", from: "2.0.0")
+//   .package(url: "https://github.com/FPJack/ZLRichLabel.git", from: "3.0.0")
 //
 
 import PackageDescription

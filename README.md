@@ -78,7 +78,7 @@ https://github.com/FPJack/ZLRichLabel.git
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/FPJack/ZLRichLabel.git", from: "2.0.0"),
+    .package(url: "https://github.com/FPJack/ZLRichLabel.git", from: "3.0.0"),
 ],
 targets: [
     .target(name: "YourTarget", dependencies: ["ZLRichLabel"]),
@@ -99,8 +99,7 @@ ZLRichLabel/Classes/
 ├── ZLRichLabel+Decoration.swift 胶囊背景 / 渐变文字的属性与绘制
 ├── ZLRichText.swift      SwiftUI 封装（UIViewRepresentable），高度自适应
 ├── ZLTagParser.swift      标签解析：通用标签（任意标签名、属性、嵌套、自闭合、容错）与 <h> 标签
-├── ZLTagRichLabel.swift   标签子类、ZLTagInfo、ZLTagSegment
-└── ZLRichLabel+Deprecated.swift 旧名字的过渡别名（Swift）
+└── ZLTagRichLabel.swift   标签子类、ZLTagInfo、ZLTagSegment
 ```
 
 ## 快速开始
@@ -911,8 +910,10 @@ label.numberOfLines = 0;
 
 ## 命名变更（迁移）
 
-所有公开类型统一使用 `ZL` 前缀。Swift 中旧名字仍可使用（`@available(*, deprecated, renamed:)` 类型别名，编译时提示改为新名字，Xcode 可一键修复）；
-Objective-C 不支持类型别名，请直接改用新类名。
+所有公开类型统一使用 `ZL` 前缀。
+
+- **2.x**：Swift 中旧名字仍可使用（过时别名，编译时提示改为新名字，Xcode 可一键修复）；Objective-C 只能使用新类名。
+- **3.0 起**：旧名字已全部删除，使用旧名字的代码会编译失败。从 2.x 升级时，建议先在 2.x 下按编译警告改为新名字，再升级到 3.0；也可以直接按下表替换。
 
 | 旧名字 | 新名字 |
 | --- | --- |
