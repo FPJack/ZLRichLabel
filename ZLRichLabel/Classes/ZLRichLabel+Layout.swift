@@ -82,14 +82,10 @@ extension ZLRichLabel {
         let truncateLastLine = lineBreakMode == .byTruncatingHead
             || lineBreakMode == .byTruncatingMiddle
             || lineBreakMode == .byTruncatingTail
-        let fontDescender = (font ?? UIFont.systemFont(ofSize: 17)).descender
 
         for lineIndex in 0..<count {
             var line = lines[lineIndex]
             var lineString: NSAttributedString = attr
-
-            var descent: CGFloat = 0
-            CTLineGetTypographicBounds(line, nil, &descent, nil)
 
             let box = lineBox(for: lines[lineIndex], in: attr, width: textRect.width)
             if lineIndex == count - 1 && truncateLastLine,
@@ -99,7 +95,7 @@ extension ZLRichLabel {
             }
 
             let penOffset = lineOffsetX(original: lines[lineIndex], drawn: line, in: attr, width: textRect.width)
-            let baselineCT = origins[lineIndex].y - descent - fontDescender
+            let baselineCT = origins[lineIndex].y
             let baselineY = textRect.minY + textRect.height - baselineCT
             let string = lineString.string as NSString
 

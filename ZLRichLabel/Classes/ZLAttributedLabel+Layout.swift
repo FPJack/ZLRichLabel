@@ -293,7 +293,6 @@ extension ZLAttributedLabel {
         let (lines, origins) = frameLines(for: text, in: textRect)
         guard !lines.isEmpty else { return NSNotFound }
         let count = lineLimit > 0 ? min(lineLimit, lines.count) : lines.count
-        let fontDescender = baselineFont.descender
 
         for lineIndex in 0..<count {
             let line = lines[lineIndex]
@@ -301,7 +300,7 @@ extension ZLAttributedLabel {
             var descent: CGFloat = 0
             var leading: CGFloat = 0
             let lineWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
-            let baselineY = textRect.minY + textRect.height - (origins[lineIndex].y - descent - fontDescender)
+            let baselineY = textRect.minY + textRect.height - origins[lineIndex].y
             if point.y < baselineY - ascent { return NSNotFound }     // 在这一行上方（行间距）
             if point.y > baselineY + descent + leading { continue }  // 在这一行下方
             let penOffset = lineOffsetX(original: line, drawn: line, in: text, width: textRect.width)
@@ -330,7 +329,6 @@ extension ZLAttributedLabel {
         let textRect = self.textRect(forBounds: bounds, limitedToNumberOfLines: lineLimit)
         let (lines, origins) = frameLines(for: text, in: textRect)
         let count = lineLimit > 0 ? min(lineLimit, lines.count) : lines.count
-        let fontDescender = baselineFont.descender
         var rects: [CGRect] = []
         for i in 0..<count {
             let line = lines[i]
@@ -340,7 +338,7 @@ extension ZLAttributedLabel {
             var ascent: CGFloat = 0
             var descent: CGFloat = 0
             let lineWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, nil))
-            let baselineY = textRect.minY + textRect.height - (origins[i].y - descent - fontDescender)
+            let baselineY = textRect.minY + textRect.height - origins[i].y
             let penOffset = lineOffsetX(original: line, drawn: line, in: text, width: textRect.width)
             // 行尾空白可能超出排版宽度（伸进右内边距），不计入矩形
             let visibleWidth = lineWidth - CGFloat(CTLineGetTrailingWhitespaceWidth(line))

@@ -2994,3 +2994,141 @@ class TextStyleChainTests: XCTestCase {
         XCTAssertNotNil(viaRuntime, "OC 可以通过 +make 获取")
     }
 }
+
+
+// MARK: - 高附件不与相邻行重叠（基线不再按 descent 修正）
+
+class TallAttachmentLineTests: XCTestCase {
+
+    private let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+    private let font = UIFont.systemFont(ofSize: 15)
+
+    private func solidImage(_ color: UIColor, size: CGSize) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            color.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+        }
+    }
+
+    private func render(_ view: UIView) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.preferredRange = .standard   // 8 位 RGBA，按 4 字节读取像素
+        return UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { ctx in
+            view.layer.render(in: ctx.cgContext)
+        }
+    }
+
+    private func rect(_ image: UIImage, matching: (UInt8, UInt8, UInt8) -> Bool) -> CGRect {
+        guard let cg = image.cgImage, let data = cg.dataProvider?.data, let ptr = CFDataGetBytePtr(data) else { return .null }
+        var rect = CGRect.null
+        for y in 0..<cg.height {
+            for x in 0..<cg.width {
+                let i = y * cg.bytesPerRow + x * 4
+                let (c0, c1, c2) = (ptr[i], ptr[i + 1], ptr[i + 2])
+                let hit = cg.bitmapInfo.contains(.byteOrder32Little) ? matching(c2, c1, c0) : matching(c0, c1, c2)
+                if hit { rect = rect.union(CGRect(x: x, y: y, width: 1, height: 1)) }
+            }
+        }
+        return rect
+    }
+
+    private let isGreen: (UInt8, UInt8, UInt8) -> Bool = { r, g, b in g > 180 && r < 80 && b < 80 }
+    private let isRed: (UInt8, UInt8, UInt8) -> Bool = { r, g, b in r > 200 && g < 60 && b < 60 }
+    private let isBlue: (UInt8, UInt8, UInt8) -> Bool = { r, g, b in b > 180 && r < 80 && g < 80 }
+
+    /// 第 1 行绿色、第 3 行蓝色，第 2 行中间插入 `middle`
+    private func text(_ middle: NSAttributedString) -> NSAttributedString {
+        let result = NSMutableAttributedString(string: "Line one above\n", attributes: [.font: font, .foregroundColor: UIColor.green])
+        result.append(NSAttributedString(string: "Mid ", attributes: [.font: font, .foregroundColor: UIColor.black]))
+        result.append(middle)
+        result.append(NSAttributedString(string: " text\n", attributes: [.font: font, .foregroundColor: UIColor.black]))
+        result.append(NSAttributedString(string: "Line three below", attributes: [.font: font, .foregroundColor: UIColor.blue]))
+        return result
+    }
+
+    private func assertNoOverlap(_ image: UIImage, height: CGFloat, file: StaticString = #filePath, line: UInt = #line) {
+        let green = rect(image, matching: isGreen)
+        let red = rect(image, matching: isRed)
+        let blue = rect(image, matching: isBlue)
+        XCTAssertFalse(green.isNull || red.isNull || blue.isNull, "三种颜色都应绘制出来", file: file, line: line)
+        XCTAssertLessThanOrEqual(green.maxY, red.minY, "第 1 行与附件重叠 green=\(green) red=\(red)", file: file, line: line)
+        XCTAssertLessThanOrEqual(red.maxY, blue.minY, "附件与第 3 行重叠 red=\(red) blue=\(blue)", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(red.minY, 0, file: file, line: line)
+        XCTAssertLessThanOrEqual(blue.maxY, height, "最后一行超出 label 底部", file: file, line: line)
+    }
+
+    func testTallImageAttachmentDoesNotOverlapNeighbourLines() {
+        for height: CGFloat in [28, 40, 60] {
+            let attachment = NSTextAttachment()
+            attachment.image = solidImage(.red, size: CGSize(width: 20, height: height))
+            // 与 Demo 14 相同：与文字垂直居中（大部分在基线下方）
+            attachment.bounds = CGRect(x: 0, y: (font.capHeight - height) / 2, width: 20, height: height)
+            let label = ZLAttributedLabel(frame: CGRect(x: 0, y: 0, width: 320, height: 0))
+            label.numberOfLines = 0
+            label.font = font
+            label.attributedText = text(NSAttributedString(attachment: attachment))
+            label.frame.size.height = ceil(label.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height)
+            let image = render(label)
+            assertNoOverlap(image, height: label.bounds.height)
+
+            // 点击定位与绘制一致：图片中心对应附件字符
+            let red = rect(image, matching: isRed)
+            let index = label.characterIndex(at: CGPoint(x: red.midX, y: red.midY))
+            let expected = (label.attributedText!.string as NSString).range(of: "\u{FFFC}").location
+            XCTAssertEqual(index, expected, "height \(height)：图片中心应命中附件字符")
+            // boundingRect 覆盖实际绘制的图片
+            let bounding = label.boundingRect(forCharacterRange: NSRange(location: expected, length: 1))
+            XCTAssertLessThanOrEqual(abs(bounding.midY - red.midY), 1.5, "height \(height)：boundingRect \(bounding) 与图片 \(red) 不一致")
+        }
+    }
+
+    func testTallWidgetViewDoesNotOverlapNeighbourLines() {
+        for alignment: ZLRichWidgetAlignment in [.middle, .baseline, .bottom, .top] {
+            let view = UIView()
+            view.backgroundColor = .red
+            let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: 320, height: 0))
+            label.numberOfLines = 0
+            label.update { v in
+                v.style = [.font: font, .foregroundColor: UIColor.black]
+                try? v.addRule(name: "box", pattern: "\\[box\\]") { ctx in
+                    ctx.attributedString.setAttributedString(
+                        ctx.attachmentString(for: ZLRichWidget(view: view, size: CGSize(width: 20, height: 60), alignment: alignment)))
+                }
+                try? v.addRule(name: "green", pattern: "Line one above") { ctx in
+                    ctx.addAttributes([.foregroundColor: UIColor.green])
+                }
+                try? v.addRule(name: "blue", pattern: "Line three below") { ctx in
+                    ctx.addAttributes([.foregroundColor: UIColor.blue])
+                }
+                v.text = "Line one above\nMid [box] text\nLine three below"
+            }
+            window.addSubview(label)
+            label.frame.size.height = ceil(label.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height)
+            label.layoutIfNeeded()
+            assertNoOverlap(render(label), height: label.bounds.height)
+            label.removeFromSuperview()
+        }
+    }
+
+    /// 单行 + `.middle` 的高 View（20×60）不超出 label 底边
+    func testTallMiddleViewStaysInsideSingleLineLabel() {
+        let view = UIView()
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: 320, height: 0))
+        label.update { v in
+            v.style = [.font: font]
+            try? v.addRule(name: "box", pattern: "\\[box\\]") { ctx in
+                ctx.attributedString.setAttributedString(
+                    ctx.attachmentString(for: ZLRichWidget(view: view, size: CGSize(width: 20, height: 60), alignment: .middle)))
+            }
+            v.text = "Hello [box] world"
+        }
+        window.addSubview(label)
+        label.frame.size.height = ceil(label.sizeThatFits(CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)).height)
+        label.layoutIfNeeded()
+        XCTAssertGreaterThanOrEqual(view.frame.minY, -0.5, "View 顶部超出 label：\(view.frame) label \(label.bounds)")
+        XCTAssertLessThanOrEqual(view.frame.maxY, label.bounds.height + 0.5, "View 底部超出 label：\(view.frame) label \(label.bounds)")
+    }
+}

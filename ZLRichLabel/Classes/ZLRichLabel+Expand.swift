@@ -75,11 +75,8 @@ extension ZLRichLabel {
               let truncated = truncatedLine(for: lastLine, in: attr, lineCount: count, width: Double(box.width))
         else { return }
 
-        var descent: CGFloat = 0
-        CTLineGetTypographicBounds(lastLine, nil, &descent, nil)
-        let fontDescender = (font ?? UIFont.systemFont(ofSize: 17)).descender
         let penOffset = lineOffsetX(original: lastLine, drawn: truncated.line, in: attr, width: textRect.width)
-        let baselineY = textRect.minY + textRect.height - (origins[count - 1].y - descent - fontDescender)
+        let baselineY = textRect.minY + textRect.height - origins[count - 1].y
 
         var rect = CGRect.null
         for run in (CTLineGetGlyphRuns(truncated.line) as? [CTRun]) ?? [] {

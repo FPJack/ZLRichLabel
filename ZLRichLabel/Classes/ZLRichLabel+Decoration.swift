@@ -328,14 +328,11 @@ extension ZLRichLabel {
         let count = numberOfLines > 0 ? min(numberOfLines, lines.count) : lines.count
         let truncates = lineBreakMode == .byTruncatingHead || lineBreakMode == .byTruncatingMiddle
             || lineBreakMode == .byTruncatingTail
-        let fontDescender = (font ?? UIFont.systemFont(ofSize: 17)).descender
 
         var result: [DecorationLine] = []
         for i in 0..<count {
             var line = lines[i]
-            var descent: CGFloat = 0
-            CTLineGetTypographicBounds(line, nil, &descent, nil)
-            let baselineY = textRect.minY + textRect.height - (origins[i].y - descent - fontDescender)
+            let baselineY = textRect.minY + textRect.height - origins[i].y
             var offset = 0
             let box = lineBox(for: lines[i], in: attr, width: textRect.width)
             if i == count - 1, truncates,
