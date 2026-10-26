@@ -19,3 +19,10 @@ post_install do |installer|
     end
   end
 end
+#1.numberOfLines 读取开销大：每次读取都要按宽度算一次实际行数（ZLRichLabel.swift:1111），绘制、点击、定位时会频繁读取。可以在内容、宽度或行数不变时缓存结果。
+#2.扩大热区查找重复计算：一次触摸按 5 个半径、多个方向调用 characterIndex（ZLAttributedLabel.swift:380），每次都重新算文字区域和行。可以先算一次再复用。
+#3.列表里算高度要先创建 View（之前提过的 ZLRichLayout）：把「解析 + 渲染 + 排版」拆成不依赖 View 的对象，cell 高度就能在后台线程预算和缓存。目前库里完全没有后台线程的处理。
+#4.预置常用规则：ZLRichRule.mention、.hashtag、.link、.phone、.email、.markdownBold 等。现在 Demo 里每次都要手写。
+#6.内嵌 View 的按下效果：现在按下高亮只作用于文字，图片和自定义 View 没有反馈。
+#7.扩大热区的 15pt、展开按钮的热区扩展量现在写死在代码里，可以做成属性。
+#9.通用标签增强：支持转义写法（例如 &lt;）、未知标签的处理方式可配置、标签属性值支持更多格式。
