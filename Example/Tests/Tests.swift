@@ -2598,3 +2598,190 @@ class DecorationBaselineOffsetTests: XCTestCase {
         XCTAssertGreaterThan(raised.bottom.1, raised.bottom.0, "上移后文字底部仍以蓝色为主")
     }
 }
+
+
+/// 首 / 中 / 尾的自定义 View：label 尺寸（宽度、Auto Layout、对齐、内边距、行数）变化后，View 跟着文字移动
+class AttachmentFollowResizeTests: XCTestCase {
+
+    private var window: UIWindow!
+
+    override func setUp() {
+        super.setUp()
+        window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        window.isHidden = false
+    }
+
+    override func tearDown() {
+        window.isHidden = true
+        window = nil
+        super.tearDown()
+    }
+
+    private static let latin = "[start] Leading view, then some words in the middle [mid] and more words "
+        + "that wrap onto following lines when the label gets narrower, finally the end view [end]"
+    private static let arabic = "[start] مرحبا بالعالم هذا نص عربي طويل [mid] يلتف على عدة أسطر عندما يصبح العرض أضيق [end]"
+
+    /// 创建 label：`[name]` 替换为对应的 View（不同尺寸、不同对齐），按文本中出现的顺序返回
+    private func makeLabel(text: String = latin,
+                           alignment: NSTextAlignment = .natural,
+                           numberOfLines: Int = 0,
+                           width: CGFloat = 320) -> (ZLRichLabel, [UIView]) {
+        let views: [String: (UIView, CGSize, ZLRichWidgetAlignment)] = [
+            "start": (UIView(), CGSize(width: 22, height: 22), .middle),
+            "mid": (UIView(), CGSize(width: 40, height: 16), .baseline),
+            "end": (UIView(), CGSize(width: 14, height: 14), .bottom),
+        ]
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: width, height: 0))
+        label.numberOfLines = numberOfLines
+        label.verticalAlignment = .top
+        label.update { v in
+            v.style = [.font: UIFont.systemFont(ofSize: 15)]
+            v.textAlignment = alignment
+            try? v.addRule(name: "view", pattern: "\\[(\\w+)\\]") { ctx in
+                guard let key = ctx.group(1), let item = views[key] else { return }
+                ctx.attributedString.setAttributedString(
+                    ctx.attachmentString(for: ZLRichWidget(view: item.0, size: item.1, alignment: item.2)))
+            }
+            v.text = text
+        }
+        window.addSubview(label)
+        fit(label)
+        return (label, ["start", "mid", "end"].map { views[$0]!.0 })
+    }
+
+    private func fit(_ label: ZLRichLabel) {
+        label.frame.size.height = ceil(label.sizeThatFits(
+            CGSize(width: label.bounds.width, height: CGFloat.greatestFiniteMagnitude)).height)
+        label.layoutIfNeeded()
+    }
+
+    private func placeholderRanges(_ label: ZLRichLabel) -> [NSRange] {
+        let string = (label.attributedText?.string ?? "") as NSString
+        return (0..<string.length).filter { string.character(at: $0) == 0xFFFC }
+            .map { NSRange(location: $0, length: 1) }
+    }
+
+    /// 每个可见 View 都落在自己占位符的位置上，并且在 label 内
+    private func assertViewsFollowText(_ label: ZLRichLabel, _ views: [UIView], expectHidden: Set<Int> = [],
+                                       _ message: String, file: StaticString = #filePath, line: UInt = #line) {
+        let ranges = placeholderRanges(label)
+        XCTAssertEqual(ranges.count, views.count, message, file: file, line: line)
+        for (i, (range, view)) in zip(ranges, views).enumerated() {
+            if expectHidden.contains(i) {
+                XCTAssertTrue(view.isHidden, "\(message)：第 \(i) 个 View 被截断后应隐藏", file: file, line: line)
+                continue
+            }
+            XCTAssertFalse(view.isHidden, "\(message)：第 \(i) 个 View 应显示", file: file, line: line)
+            let rect = label.boundingRect(forCharacterRange: range)
+            XCTAssertEqual(view.frame.minX, rect.minX, accuracy: 1,
+                           "\(message)：第 \(i) 个 View 的 x 应等于占位符 x（view \(view.frame) / 占位 \(rect)）",
+                           file: file, line: line)
+            XCTAssertEqual(view.frame.width, rect.width, accuracy: 1,
+                           "\(message)：第 \(i) 个 View 宽度应等于占位宽度", file: file, line: line)
+            XCTAssertTrue(view.frame.midY >= rect.minY - 1 && view.frame.midY <= rect.maxY + 1,
+                          "\(message)：第 \(i) 个 View 应在占位符所在行（view \(view.frame) / 占位 \(rect)）",
+                          file: file, line: line)
+            XCTAssertTrue(label.bounds.insetBy(dx: -0.5, dy: -0.5).contains(view.frame),
+                          "\(message)：第 \(i) 个 View 应在 label 内（\(view.frame) / \(label.bounds)）",
+                          file: file, line: line)
+        }
+    }
+
+    func testFrameWidthChangeMovesViews() {
+        let (label, views) = makeLabel()
+        assertViewsFollowText(label, views, "初始 320")
+        let endBefore = views[2].frame
+
+        for width: CGFloat in [240, 180, 130, 320] {
+            label.frame.size.width = width
+            fit(label)
+            assertViewsFollowText(label, views, "宽度 \(width)")
+            if width == 130 {
+                XCTAssertGreaterThan(views[2].frame.minY, endBefore.minY, "变窄后结尾 View 应下移到后面的行")
+            }
+        }
+        XCTAssertEqual(views[2].frame, endBefore, "恢复原宽度后位置复原")
+    }
+
+    func testOnlyChangingBoundsWithoutManualLayoutIsPickedUpOnNextLayoutPass() {
+        let (label, views) = makeLabel()
+        let midBefore = views[1].frame
+        // 只改尺寸，不手动调用 layoutIfNeeded：UIKit 会标记需要布局，下一次布局时 View 位置更新
+        label.frame.size = CGSize(width: 150, height: 400)
+        XCTAssertTrue(label.layer.needsLayout(), "尺寸变化后 label 应被标记为需要布局")
+        window.layoutIfNeeded()
+        XCTAssertNotEqual(views[1].frame, midBefore)
+        assertViewsFollowText(label, views, "宽度 150（未手动 layoutIfNeeded）")
+    }
+
+    func testAutoLayoutWidthChangeMovesViews() {
+        let (label, views) = makeLabel()
+        label.removeFromSuperview()
+        let container = UIView(frame: window.bounds)
+        window.addSubview(container)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(label)
+        let width = label.widthAnchor.constraint(equalToConstant: 320)
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: container.topAnchor),
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            width,
+        ])
+        container.layoutIfNeeded()
+        assertViewsFollowText(label, views, "Auto Layout 320")
+        let heightBefore = label.bounds.height
+
+        width.constant = 140
+        container.layoutIfNeeded()
+        XCTAssertGreaterThan(label.bounds.height, heightBefore, "变窄后自动高度应增加")
+        assertViewsFollowText(label, views, "Auto Layout 140")
+
+        width.constant = 260
+        container.layoutIfNeeded()
+        assertViewsFollowText(label, views, "Auto Layout 260")
+    }
+
+    func testAlignmentsWhileResizing() {
+        for alignment in [NSTextAlignment.left, .center, .right, .justified] {
+            let (label, views) = makeLabel(alignment: alignment)
+            for width: CGFloat in [320, 200, 150] {
+                label.frame.size.width = width
+                fit(label)
+                assertViewsFollowText(label, views, "对齐 \(alignment.rawValue) 宽度 \(width)")
+            }
+        }
+    }
+
+    func testRightToLeftWhileResizing() {
+        let (label, views) = makeLabel(text: Self.arabic)
+        for width: CGFloat in [320, 220, 150] {
+            label.frame.size.width = width
+            fit(label)
+            assertViewsFollowText(label, views, "RTL 宽度 \(width)")
+        }
+    }
+
+    func testTextInsetsChangeMovesViews() {
+        let (label, views) = makeLabel()
+        let startBefore = views[0].frame
+        label.textInsets = UIEdgeInsets(top: 10, left: 24, bottom: 10, right: 24)
+        fit(label)
+        XCTAssertEqual(views[0].frame.minX - startBefore.minX, 24, accuracy: 0.5)
+        assertViewsFollowText(label, views, "内边距 24")
+    }
+
+    func testTruncatedViewsHideAndReappear() {
+        let (label, views) = makeLabel(numberOfLines: 2, width: 320)
+        label.lineBreakMode = .byTruncatingTail
+        fit(label)
+        assertViewsFollowText(label, views, expectHidden: [2], "2 行宽 320：结尾 View 被截断")
+
+        label.frame.size.width = 160
+        fit(label)
+        assertViewsFollowText(label, views, expectHidden: [1, 2], "2 行宽 160：中间和结尾都被截断")
+
+        label.numberOfLines = 0
+        fit(label)
+        assertViewsFollowText(label, views, "不限行数：全部重新显示")
+    }
+}

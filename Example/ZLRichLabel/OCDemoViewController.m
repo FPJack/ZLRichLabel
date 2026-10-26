@@ -552,6 +552,14 @@ static NSString *OCQuote(NSString *s) {
 @property (nonatomic, assign) NSInteger appended23;
 /// 用例 25：长按菜单从手势位置弹出
 @property (nonatomic, weak) ZLTagRichLabel *case25Label;
+/// 用例 30：首 / 中 / 尾自定义 View 跟随 label 尺寸
+@property (nonatomic, weak) ZLRichLabel *case30Label;
+@property (nonatomic, weak) NSLayoutConstraint *case30Width;
+@property (nonatomic, weak) UISlider *case30Slider;
+@property (nonatomic, weak) UILabel *case30Status;
+/// @[标题, View]，按文本中出现的顺序
+@property (nonatomic, copy) NSArray<NSArray *> *case30Views;
+@property (nonatomic, assign) BOOL case30Followed;
 @end
 
 @implementation OCDemoViewController
@@ -618,6 +626,8 @@ static NSString *OCQuote(NSString *s) {
     // 胶囊背景 / 渐变文字
     [self case28];
     [self case28b];
+    // 首 / 中 / 尾自定义 View 跟随 label 尺寸
+    [self case30];
     [self.stackView addArrangedSubview:self.historyCard];
 
     [self refreshTapViews];
@@ -1932,6 +1942,221 @@ static NSString *OCQuote(NSString *s) {
     self.case23Stats.text = [NSString stringWithFormat:
         @"ZLRichParser.resolve：%.2f ms\n文本 %lu 字符，3 条规则，生效命中 %lu 个\n（含正则匹配耗时；label 未参与）",
         ms, (unsigned long)text.length, (unsigned long)matches.count];
+}
+
+#pragma mark - 首 / 中 / 尾自定义 View 跟随 label 尺寸
+
+/// 30. 开头 / 中间 / 结尾插入自定义 View，修改 label 宽度、对齐、行数、内边距后，View 自动跟随文字重新定位。
+/// 下方实时比较每个 View 的 frame 与它在文字中占位符的位置（boundingRectForCharacterRange:）
+- (void)case30 {
+    NSString *name = @"30. 首 / 中 / 尾自定义 View 跟随 label 尺寸";
+    NSString *source = @"[avatar] 开头是头像 View，中间插入一个 [follow] 按钮和 [badge] 徽章，"
+                        @"拖动下面的宽度滑块，后面的文字会重新折行，View 跟着文字一起移动，结尾是箭头 [arrow]";
+
+    UILabel *avatar = [UILabel new];
+    avatar.text = @"Z";
+    avatar.font = [UIFont boldSystemFontOfSize:12];
+    avatar.textColor = UIColor.whiteColor;
+    avatar.textAlignment = NSTextAlignmentCenter;
+    avatar.backgroundColor = kDeepPurple;
+    avatar.layer.cornerRadius = 11;
+    avatar.layer.masksToBounds = YES;
+
+    // 自己处理点击的按钮：文字变化后尺寸变化，调用 zl_setNeedsRichLabelLayout 重新排版
+    OCPaddingLabel *follow = [[OCPaddingLabel alloc] initWithInsets:UIEdgeInsetsMake(2, 8, 2, 8)];
+    follow.text = @"+ 关注";
+    follow.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    follow.textColor = UIColor.whiteColor;
+    follow.backgroundColor = kBlue;
+    follow.layer.cornerRadius = 9;
+    follow.layer.masksToBounds = YES;
+    follow.userInteractionEnabled = YES;
+    [follow addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(follow30:)]];
+
+    OCPaddingLabel *badge = [[OCPaddingLabel alloc] initWithInsets:UIEdgeInsetsMake(1, 5, 1, 5)];
+    badge.text = @"LV.5";
+    badge.font = [UIFont boldSystemFontOfSize:10];
+    badge.textColor = UIColor.whiteColor;
+    badge.backgroundColor = kAmber;
+    badge.layer.cornerRadius = 4;
+    badge.layer.masksToBounds = YES;
+
+    UIImageView *arrow = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right.circle.fill"]];
+    arrow.tintColor = kTeal;
+
+    self.case30Views = @[@[@"头像", avatar], @[@"按钮", follow], @[@"徽章", badge], @[@"箭头", arrow]];
+    NSDictionary<NSString *, ZLRichWidget *> *widgets = @{
+        @"avatar": [ZLRichWidget widgetWithView:avatar size:CGSizeMake(22, 22) position:ZLRichWidgetPositionReplace],
+        // CGSizeZero：自动计算尺寸；按钮自己处理点击
+        @"follow": [[ZLRichWidget alloc] initWithView:follow size:CGSizeZero position:ZLRichWidgetPositionReplace
+                                            alignment:ZLRichWidgetAlignmentMiddle tappable:NO],
+        @"badge": [ZLRichWidget widgetWithView:badge size:CGSizeZero position:ZLRichWidgetPositionReplace],
+        @"arrow": [ZLRichWidget widgetWithView:arrow size:CGSizeMake(18, 18) position:ZLRichWidgetPositionReplace],
+    };
+
+    __weak typeof(self) weakSelf = self;
+    ZLRichLabel *label = [[ZLRichLabel alloc] initWithFrame:CGRectZero];
+    label.numberOfLines = 0;
+    label.verticalAlignment = ZLLabelVerticalAlignmentTop;
+    label.backgroundColor = OCHex(0xEADDFF);
+    [label update:^(ZLRichLabel *v) {
+        v.style = OCDemoViewController.baseStyle;
+        [v addRuleWithName:@"view" pattern:@"\\[(\\w+)\\]" options:0 priority:0 error:nil
+                   handler:^(ZLRichRuleContext *ctx) {
+            NSString *key = [ctx groupAtIndex:1];
+            ZLRichWidget *widget = key ? widgets[key] : nil;
+            if (!widget) return;
+            [ctx.attributedString setAttributedString:[ctx attachmentStringForWidget:widget style:nil]];
+            ctx.onTap = [weakSelf ruleTapForCase:name action:[@"点击 View " stringByAppendingString:key]];
+        }];
+        v.text = source;
+    }];
+    self.case30Label = label;
+
+    // label 放在容器里，宽度 = 容器宽度 × 滑块比例（Auto Layout 自适应高度）
+    UIView *container = [UIView new];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    [container addSubview:label];
+    NSLayoutConstraint *width = [label.widthAnchor constraintEqualToAnchor:container.widthAnchor];
+    [NSLayoutConstraint activateConstraints:@[
+        [label.topAnchor constraintEqualToAnchor:container.topAnchor],
+        [label.bottomAnchor constraintEqualToAnchor:container.bottomAnchor],
+        [label.leadingAnchor constraintEqualToAnchor:container.leadingAnchor],
+        width,
+    ]];
+    self.case30Width = width;
+
+    UISlider *slider = [UISlider new];
+    slider.minimumValue = 0.3;
+    slider.maximumValue = 1;
+    slider.value = 1;
+    [slider addTarget:self action:@selector(width30:) forControlEvents:UIControlEventValueChanged];
+    self.case30Slider = slider;
+
+    UISegmentedControl *alignment = [[UISegmentedControl alloc] initWithItems:@[@"自然", @"左", @"居中", @"右"]];
+    alignment.selectedSegmentIndex = 0;
+    [alignment addTarget:self action:@selector(alignment30:) forControlEvents:UIControlEventValueChanged];
+
+    UISegmentedControl *lines = [[UISegmentedControl alloc] initWithItems:@[@"不限行", @"2 行", @"内边距 0", @"内边距 16"]];
+    lines.selectedSegmentIndex = UISegmentedControlNoSegment;
+    [lines addTarget:self action:@selector(lines30:) forControlEvents:UIControlEventValueChanged];
+
+    UIButton *animate = [UIButton buttonWithType:UIButtonTypeSystem];
+    [animate setTitle:@"▶︎ 动画：宽度 100% → 35% → 100%" forState:UIControlStateNormal];
+    animate.titleLabel.font = [UIFont systemFontOfSize:13];
+    animate.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading;
+    [animate addTarget:self action:@selector(animate30) forControlEvents:UIControlEventTouchUpInside];
+
+    UILabel *hint = [OCCardView label:@"宽度（拖动滑块）/ 对齐 / 行数与内边距" font:[UIFont systemFontOfSize:11]
+                                color:[UIColor colorWithWhite:0 alpha:0.45]];
+    UILabel *status = [OCCardView label:@"" font:[UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightRegular]
+                                  color:[UIColor colorWithWhite:0 alpha:0.7]];
+    self.case30Status = status;
+
+    UIStackView *content = [[UIStackView alloc] initWithArrangedSubviews:@[hint, slider, alignment, lines, animate, container, status]];
+    content.axis = UILayoutConstraintAxisVertical;
+    content.spacing = 8;
+
+    OCDemoCard *card = [[OCDemoCard alloc] initWithTitle:name source:source content:content];
+    self.cards[name] = card;
+    [self.stackView addArrangedSubview:card];
+    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf refresh30]; });
+}
+
+/// 修改宽度比例：替换宽度约束（multiplier 只读）
+- (void)setWidthRatio30:(CGFloat)ratio {
+    ZLRichLabel *label = self.case30Label;
+    UIView *container = label.superview;
+    if (!label || !container) return;
+    self.case30Width.active = NO;
+    NSLayoutConstraint *width = [label.widthAnchor constraintEqualToAnchor:container.widthAnchor multiplier:ratio];
+    width.active = YES;
+    self.case30Width = width;
+}
+
+- (void)width30:(UISlider *)sender {
+    [self setWidthRatio30:sender.value];
+    [self.view layoutIfNeeded];   // 只改了约束，label 在布局时（layoutSubviews）自动重新定位 View
+    [self refresh30];
+}
+
+- (void)alignment30:(UISegmentedControl *)sender {
+    NSTextAlignment values[] = {NSTextAlignmentNatural, NSTextAlignmentLeft, NSTextAlignmentCenter, NSTextAlignmentRight};
+    self.case30Label.textAlignment = values[sender.selectedSegmentIndex];
+    [self.view layoutIfNeeded];
+    [self refresh30];
+}
+
+- (void)lines30:(UISegmentedControl *)sender {
+    ZLRichLabel *label = self.case30Label;
+    switch (sender.selectedSegmentIndex) {
+        case 0: label.numberOfLines = 0; break;
+        case 1: label.numberOfLines = 2; label.lineBreakMode = NSLineBreakByTruncatingTail; break;
+        case 2: label.textInsets = UIEdgeInsetsZero; break;
+        default: label.textInsets = UIEdgeInsetsMake(8, 16, 8, 16); break;
+    }
+    [UIView animateWithDuration:0.25 animations:^{ [self.view layoutIfNeeded]; }
+                     completion:^(BOOL finished) { [self refresh30]; }];
+}
+
+- (void)animate30 {
+    [self setWidthRatio30:0.35];
+    [self.case30Slider setValue:0.35 animated:YES];
+    [UIView animateWithDuration:0.8 animations:^{ [self.view layoutIfNeeded]; } completion:^(BOOL finished) {
+        [self refresh30];
+        [self setWidthRatio30:1];
+        [self.case30Slider setValue:1 animated:YES];
+        [UIView animateWithDuration:0.8 delay:0.4 options:0 animations:^{ [self.view layoutIfNeeded]; }
+                         completion:^(BOOL done) { [self refresh30]; }];
+    }];
+}
+
+/// 按钮自己处理点击：文字变长 / 变短，尺寸自动计算，通知 label 重新排版
+- (void)follow30:(UITapGestureRecognizer *)gesture {
+    UILabel *button = (UILabel *)gesture.view;
+    if (![button isKindOfClass:UILabel.class]) return;
+    self.case30Followed = !self.case30Followed;
+    button.text = self.case30Followed ? @"✓ 已关注" : @"+ 关注";
+    button.backgroundColor = self.case30Followed ? kGrey : kBlue;
+    [button zl_setNeedsRichLabelLayout];
+    [self.view layoutIfNeeded];
+    [self refresh30];
+    ZLTagInfo *info = [[ZLTagInfo alloc] initWithIndex:0 name:@"follow" text:button.text ?: @"" raw:@"[follow]"];
+    [self onTap:@"30. 首 / 中 / 尾自定义 View 跟随 label 尺寸" info:info action:@"按钮自己处理点击，尺寸变化"];
+}
+
+/// 实时展示：label 宽度 + 每个 View 的 frame，并与它的占位符位置比较
+- (void)refresh30 {
+    ZLRichLabel *label = self.case30Label;
+    UILabel *status = self.case30Status;
+    if (!label || !status) return;
+    NSString *string = label.attributedText.string ?: @"";
+    NSMutableArray<NSNumber *> *ranges = [NSMutableArray array];
+    for (NSUInteger i = 0; i < string.length; i++) {
+        if ([string characterAtIndex:i] == 0xFFFC) [ranges addObject:@(i)];
+    }
+    NSMutableArray<NSString *> *lines = [NSMutableArray arrayWithObject:
+        [NSString stringWithFormat:@"label %.0f × %.0f", label.bounds.size.width, label.bounds.size.height]];
+    BOOL allOK = YES;
+    for (NSUInteger i = 0; i < self.case30Views.count && i < ranges.count; i++) {
+        NSString *title = self.case30Views[i][0];
+        UIView *view = self.case30Views[i][1];
+        if (view.hidden) {
+            [lines addObject:[NSString stringWithFormat:@"%@  已截断，隐藏", title]];
+            continue;
+        }
+        CGRect slot = [label boundingRectForCharacterRange:NSMakeRange(ranges[i].unsignedIntegerValue, 1)];
+        BOOL ok = fabs(CGRectGetMinX(view.frame) - CGRectGetMinX(slot)) <= 1
+            && CGRectGetMidY(view.frame) >= CGRectGetMinY(slot) - 1
+            && CGRectGetMidY(view.frame) <= CGRectGetMaxY(slot) + 1;
+        allOK = allOK && ok;
+        NSString *result = ok ? @"✅ 与文字位置一致"
+            : [NSString stringWithFormat:@"❌ 偏离（占位 x=%.0f y=%.0f）", CGRectGetMinX(slot), CGRectGetMinY(slot)];
+        [lines addObject:[NSString stringWithFormat:@"%@  x=%5.1f y=%5.1f  %@", title,
+                          CGRectGetMinX(view.frame), CGRectGetMinY(view.frame), result]];
+    }
+    [lines addObject:allOK ? @"结论：所有 View 已跟随 label 尺寸更新" : @"结论：有 View 位置未更新"];
+    status.text = [lines componentsJoinedByString:@"\n"];
 }
 
 @end

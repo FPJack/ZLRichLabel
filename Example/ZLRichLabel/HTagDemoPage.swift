@@ -112,6 +112,8 @@ final class HTagDemoPage: UIViewController {
         case28b()
         // 内边距
         case29()
+        // 首 / 中 / 尾自定义 View 跟随 label 尺寸
+        case30()
         stackView.addArrangedSubview(historyCard)
 
         refreshTapViews()
@@ -315,6 +317,7 @@ final class HTagDemoPage: UIViewController {
                 "h4": [.foregroundColor: UIColor.mRed,
                        .strikethroughStyle: NSUnderlineStyle.single.rawValue],
             ]
+            
         }
     }
 
@@ -991,7 +994,7 @@ final class HTagDemoPage: UIViewController {
                 badge.layer.masksToBounds = true
                 return ZLRichWidget(view: badge)
             }
-            try? v.addRule(name: "mention", pattern: "@\\w+") { ctx in
+            try? v.addRule(name: "mention", pattern: "@\\w+") { [weak self] ctx in
                 ctx.addAttributes([.foregroundColor: UIColor.mPurple])
                 ctx.onTap = { [weak self] match in self?.onRuleTap(name, match, action: "点击 @") }
             }
@@ -1024,6 +1027,210 @@ final class HTagDemoPage: UIViewController {
         guard let label = case29Label else { return }
         label.textInsets = Self.insets29[sender.selectedSegmentIndex].1
         UIView.animate(withDuration: 0.25) { self.view.layoutIfNeeded() }
+    }
+
+    // MARK: - 首 / 中 / 尾自定义 View 跟随 label 尺寸
+
+    private weak var case30Label: ZLRichLabel?
+    private weak var case30Width: NSLayoutConstraint?
+    private weak var case30Slider: UISlider?
+    private weak var case30Status: UILabel?
+    private var case30Views: [(String, UIView)] = []
+    private var case30Followed = false
+
+    /// 30. 开头 / 中间 / 结尾插入自定义 View，修改 label 宽度、对齐、内边距、行数后，View 自动跟随文字重新定位。
+    /// 下方实时比较每个 View 的 frame 与它在文字中占位符的位置（boundingRect(forCharacterRange:)）
+    private func case30() {
+        let name = "30. 首 / 中 / 尾自定义 View 跟随 label 尺寸"
+        let source = "[avatar] 开头是头像 View，中间插入一个 [follow] 按钮和 [badge] 徽章，"
+            + "拖动下面的宽度滑块，后面的文字会重新折行，View 跟着文字一起移动，结尾是箭头 [arrow]"
+
+        let avatar = UILabel()
+        avatar.text = "Z"
+        avatar.font = .boldSystemFont(ofSize: 12)
+        avatar.textColor = .white
+        avatar.textAlignment = .center
+        avatar.backgroundColor = .mDeepPurple
+        avatar.layer.cornerRadius = 11
+        avatar.layer.masksToBounds = true
+
+        // 自己处理点击的按钮：标题变化后尺寸变化，调用 zl_setNeedsRichLabelLayout() 重新排版
+        let follow = PaddingLabel(insets: UIEdgeInsets(top: 2, left: 8, bottom: 2, right: 8))
+        follow.text = "+ 关注"
+        follow.font = .systemFont(ofSize: 12, weight: .semibold)
+        follow.textColor = .white
+        follow.backgroundColor = .mBlue
+        follow.layer.cornerRadius = 9
+        follow.layer.masksToBounds = true
+        follow.isUserInteractionEnabled = true
+        follow.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(follow30(_:))))
+
+        let badge = PaddingLabel(insets: UIEdgeInsets(top: 1, left: 5, bottom: 1, right: 5))
+        badge.text = "LV.5"
+        badge.font = .boldSystemFont(ofSize: 10)
+        badge.textColor = .white
+        badge.backgroundColor = .mAmber
+        badge.layer.cornerRadius = 4
+        badge.layer.masksToBounds = true
+
+        let arrow = UIImageView(image: UIImage(systemName: "chevron.right.circle.fill"))
+        arrow.tintColor = .mTeal
+
+        case30Views = [("头像", avatar), ("按钮", follow), ("徽章", badge), ("箭头", arrow)]
+        let widgets: [String: ZLRichWidget] = [
+            "avatar": ZLRichWidget(view: avatar, size: CGSize(width: 22, height: 22)),
+            "follow": ZLRichWidget(view: follow, tappable: false),        // .zero：自动计算尺寸
+            "badge": ZLRichWidget(view: badge),
+            "arrow": ZLRichWidget(view: arrow, size: CGSize(width: 18, height: 18)),
+        ]
+
+        let label = ZLRichLabel(frame: .zero)
+        label.numberOfLines = 0
+        label.verticalAlignment = .top
+        label.backgroundColor = UIColor(hex: 0xEADDFF)
+        label.update { v in
+            v.style = HTagDemoPage.baseStyle
+            try? v.addRule(name: "view", pattern: "\\[(\\w+)\\]") { [weak self] ctx in
+                guard let key = ctx.group(1), let widget = widgets[key] else { return }
+                ctx.attributedString.setAttributedString(ctx.attachmentString(for: widget))
+                ctx.onTap = { [weak self] match in self?.onRuleTap(name, match, action: "点击 View \(key)") }
+            }
+            v.text = source
+        }
+        case30Label = label
+
+        // label 放在容器里，宽度 = 容器宽度 × 滑块比例（Auto Layout 自适应高度）
+        let container = UIView()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(label)
+        let width = label.widthAnchor.constraint(equalTo: container.widthAnchor)
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: container.topAnchor),
+            label.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            width,
+        ])
+        case30Width = width
+
+        let slider = UISlider()
+        slider.minimumValue = 0.3
+        slider.maximumValue = 1
+        slider.value = 1
+        slider.addTarget(self, action: #selector(width30(_:)), for: .valueChanged)
+        case30Slider = slider
+
+        let alignment = UISegmentedControl(items: ["自然", "左", "居中", "右"])
+        alignment.selectedSegmentIndex = 0
+        alignment.addTarget(self, action: #selector(alignment30(_:)), for: .valueChanged)
+
+        let lines = UISegmentedControl(items: ["不限行", "2 行", "内边距 0", "内边距 16"])
+        lines.selectedSegmentIndex = UISegmentedControl.noSegment
+        lines.addTarget(self, action: #selector(lines30(_:)), for: .valueChanged)
+
+        let animate = UIButton(type: .system)
+        animate.setTitle("▶︎ 动画：宽度 100% → 35% → 100%", for: .normal)
+        animate.titleLabel?.font = .systemFont(ofSize: 13)
+        animate.contentHorizontalAlignment = .leading
+        animate.addTarget(self, action: #selector(animate30), for: .touchUpInside)
+
+        let hint = CardView.label("宽度（拖动滑块）/ 对齐 / 行数与内边距", font: .systemFont(ofSize: 11),
+                                  color: UIColor(white: 0, alpha: 0.45))
+        let status = CardView.label("", font: .monospacedSystemFont(ofSize: 10, weight: .regular),
+                                    color: UIColor(white: 0, alpha: 0.7))
+        status.numberOfLines = 0
+        case30Status = status
+
+        let content = UIStackView(arrangedSubviews: [hint, slider, alignment, lines, animate, container, status])
+        content.axis = .vertical
+        content.spacing = 8
+
+        let card = DemoCard(title: name, source: source, content: content)
+        cards[name] = card
+        stackView.addArrangedSubview(card)
+        DispatchQueue.main.async { [weak self] in self?.refresh30() }
+    }
+
+    /// 修改宽度比例：替换宽度约束（multiplier 只读）
+    private func setWidthRatio30(_ ratio: CGFloat) {
+        guard let label = case30Label, let container = label.superview, let old = case30Width else { return }
+        old.isActive = false
+        let width = label.widthAnchor.constraint(equalTo: container.widthAnchor, multiplier: ratio)
+        width.isActive = true
+        case30Width = width
+    }
+
+    @objc private func width30(_ sender: UISlider) {
+        setWidthRatio30(CGFloat(sender.value))
+        view.layoutIfNeeded()   // 只改了约束，label 在布局时（layoutSubviews）自动重新定位 View
+        refresh30()
+    }
+
+    @objc private func alignment30(_ sender: UISegmentedControl) {
+        let values: [NSTextAlignment] = [.natural, .left, .center, .right]
+        case30Label?.textAlignment = values[sender.selectedSegmentIndex]
+        view.layoutIfNeeded()
+        refresh30()
+    }
+
+    @objc private func lines30(_ sender: UISegmentedControl) {
+        guard let label = case30Label else { return }
+        switch sender.selectedSegmentIndex {
+        case 0: label.numberOfLines = 0
+        case 1: label.numberOfLines = 2; label.lineBreakMode = .byTruncatingTail
+        case 2: label.textInsets = .zero
+        default: label.textInsets = UIEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
+        }
+        UIView.animate(withDuration: 0.25) { self.view.layoutIfNeeded() } completion: { _ in self.refresh30() }
+    }
+
+    @objc private func animate30() {
+        setWidthRatio30(0.35)
+        case30Slider?.setValue(0.35, animated: true)
+        UIView.animate(withDuration: 0.8, animations: { self.view.layoutIfNeeded() }) { _ in
+            self.refresh30()
+            self.setWidthRatio30(1)
+            self.case30Slider?.setValue(1, animated: true)
+            UIView.animate(withDuration: 0.8, delay: 0.4, options: [], animations: { self.view.layoutIfNeeded() }) { _ in
+                self.refresh30()
+            }
+        }
+    }
+
+    /// 按钮自己处理点击：标题变长 / 变短，尺寸自动计算，通知 label 重新排版
+    @objc private func follow30(_ gesture: UITapGestureRecognizer) {
+        guard let button = gesture.view as? UILabel else { return }
+        case30Followed.toggle()
+        button.text = case30Followed ? "✓ 已关注" : "+ 关注"
+        button.backgroundColor = case30Followed ? .mGrey : .mBlue
+        button.zl_setNeedsRichLabelLayout()
+        view.layoutIfNeeded()
+        refresh30()
+        let info = ZLTagInfo(index: 0, name: "follow", text: button.text ?? "", raw: "[follow]")
+        onTap("30. 首 / 中 / 尾自定义 View 跟随 label 尺寸", info, action: "按钮自己处理点击，尺寸变化")
+    }
+
+    /// 实时展示：label 宽度 + 每个 View 的 frame，并与它的占位符位置比较
+    private func refresh30() {
+        guard let label = case30Label, let status = case30Status else { return }
+        let string = (label.attributedText?.string ?? "") as NSString
+        let ranges = (0..<string.length).filter { string.character(at: $0) == 0xFFFC }
+        var lines = [String(format: "label %.0f × %.0f", label.bounds.width, label.bounds.height)]
+        var allOK = true
+        for (i, (title, view)) in case30Views.enumerated() {
+            guard i < ranges.count else { continue }
+            if view.isHidden {
+                lines.append("\(title)  已截断，隐藏")
+                continue
+            }
+            let slot = label.boundingRect(forCharacterRange: NSRange(location: ranges[i], length: 1))
+            let ok = abs(view.frame.minX - slot.minX) <= 1
+                && view.frame.midY >= slot.minY - 1 && view.frame.midY <= slot.maxY + 1
+            allOK = allOK && ok
+            lines.append(String(format: "%@  x=%5.1f y=%5.1f  %@", title, view.frame.minX, view.frame.minY,
+                                ok ? "✅ 与文字位置一致" : "❌ 偏离（占位 x=\(Int(slot.minX)) y=\(Int(slot.minY))）"))
+        }
+        lines.append(allOK ? "结论：所有 View 已跟随 label 尺寸更新" : "结论：有 View 位置未更新")
+        status.text = lines.joined(separator: "\n")
     }
 
     // MARK: - 选中复制

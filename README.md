@@ -238,6 +238,17 @@ try? label.addRule(name: "vip", pattern: "\\[vip\\]") { ctx in
 }
 ```
 
+### label 尺寸变化时 View 的位置
+
+label 自身的宽度 / 高度、对齐方式、`textInsets`、`numberOfLines` 变化后，内嵌 View 会在 label 下一次布局（`layoutSubviews`）时按新的排版重新定位，无需手动调用：
+
+- 修改 `frame`、Auto Layout 约束、`UIView.animate` 动画中修改宽度都会生效（动画中 View 跟随 label 一起移动）；
+- 每个 View 都对齐到它在文字中的占位符位置，可以用 `boundingRect(forCharacterRange:)` 核对；
+- 截断（`numberOfLines` 限制）后不在可见行内的 View 会隐藏，取消截断后重新显示；
+- 从右到左（RTL）文本同样适用。
+
+只改了尺寸但需要**立即**读取 View 的 frame 时，先调用 `label.layoutIfNeeded()`（或父视图的 `layoutIfNeeded()`）。
+
 ### 自定义 View 尺寸变化
 
 内嵌的自定义 View（`ZLRichWidget` / `attachmentString(for:)` / `tagWidgetBuilder`）尺寸或内容变化后，label 会重新排版：后面的文字跟着移动、换行，label 高度同步更新（Auto Layout 下会触发外部重新布局）。只替换占位尺寸，**不会**重新执行规则 handler / builder，已有的点击和链接保持不变。
@@ -1017,6 +1028,7 @@ Example 工程通过 Swift Package Manager 引用仓库根目录的本地包（`
 | 28 | 胶囊背景 / 渐变文字：#话题# 胶囊（按下变深）、行内代码、实心徽章、只有边框的标签、横向 / 竖向渐变、跨行的胶囊 |
 | 28b | RTL / 双向混排的胶囊：阿拉伯语、希伯来语 #话题#，紧挨着的两个 RTL 胶囊，阿拉伯语中的英文胶囊、英文中的阿拉伯胶囊（两侧内边距一致，可点击） |
 | 29 | 内边距 `textInsets`：圆角背景的 label 切换 0 / 8 / 12·16 / 24 内边距，文字重新折行；链接、内嵌标签、展开 / 收起都在内边距以内 |
+| 30 | 首 / 中 / 尾自定义 View 跟随 label 尺寸：开头头像、中间按钮和徽章、结尾箭头；拖动滑块改 label 宽度、切换对齐 / 行数 / 内边距、宽度动画，点「关注」改按钮尺寸，下方实时比较每个 View 与文字占位符的位置 |
 
 页面顶部会显示最近一次点击得到的完整信息，底部有点击历史。
 
