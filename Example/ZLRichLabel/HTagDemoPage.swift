@@ -1184,6 +1184,44 @@ final class HTagDemoPage: UIViewController {
                 }
             }
         }
+
+        // 24e. 外部决定是否展开 / 收起：设置 onExpandTokenTap 后点击按钮不再自动切换
+        let externalTitle = "24e. onExpandTokenTap：外部决定是否展开 / 收起"
+        addCase(externalTitle, source: long) { v in
+            v.numberOfLines = 3
+            v.tagStyle = [.foregroundColor: UIColor.mBlue]
+            let tokenStyle: ZLTextStyle = [.foregroundColor: UIColor.mTeal,
+                                             .font: UIFont.systemFont(ofSize: 15, weight: .semibold)]
+            v.expandToken = NSAttributedString(string: "… 全文", attributes: tokenStyle)
+            v.collapseToken = NSAttributedString(string: " 收起", attributes: tokenStyle)
+            v.onExpandChanged = { [weak self] expanded in
+                guard let self = self else { return }
+                let info = ZLTagInfo(index: 0, name: "expand", text: expanded ? "全文" : "收起", raw: "")
+                self.onTap(externalTitle, info, action: "onExpandChanged(\(expanded))")
+                UIView.animate(withDuration: 0.25) { self.view.layoutIfNeeded() }
+            }
+            v.onExpandTokenTap = { [weak self] label, wantsExpand in
+                guard let self = self else { return }
+                let info = ZLTagInfo(index: 0, name: "expandToken", text: wantsExpand ? "全文" : "收起", raw: "")
+                self.onTap(externalTitle, info, action: "onExpandTokenTap(wantsExpand: \(wantsExpand))")
+                let sheet = UIAlertController(title: wantsExpand ? "展开全文？" : "收起？",
+                                              message: "设置了 onExpandTokenTap：由外部决定，不设置时内部自动切换",
+                                              preferredStyle: .actionSheet)
+                sheet.addAction(UIAlertAction(title: wantsExpand ? "展开（toggleExpanded）" : "收起（toggleExpanded）",
+                                              style: .default) { _ in
+                    label.toggleExpanded()   // 按默认方式切换，并回调 onExpandChanged
+                })
+                if wantsExpand {
+                    sheet.addAction(UIAlertAction(title: "跳转详情页（不展开）", style: .default) { [weak self] _ in
+                        self?.onTap(externalTitle, info, action: "跳转详情页")
+                    })
+                }
+                sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+                sheet.popoverPresentationController?.sourceView = label
+                sheet.popoverPresentationController?.sourceRect = label.expandTokenRect
+                self.present(sheet, animated: true)
+            }
+        }
     }
 
     // MARK: - 性能

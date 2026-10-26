@@ -91,10 +91,17 @@ targets: [
 
 ```text
 ZLRichLabel/Classes/
-├── ZLAttributedLabel.swift 底层富文本 Label：CoreText 绘制、内边距、截断、链接、尺寸计算、无障碍
+├── ZLAttributedLabel.swift                底层富文本 Label：属性定义、文字设置、初始化
+├── ZLAttributedLabel+Layout.swift         排版：字号自适应、textRect / sizeThatFits、字符定位、截断
+├── ZLAttributedLabel+Drawing.swift        绘制：CoreText 绘制文字，补充背景色与删除线
+├── ZLAttributedLabel+Link.swift           链接与触摸：添加 / 查找链接、自动识别、按下样式、点击与长按
+├── ZLAttributedLabel+Accessibility.swift  无障碍：每个链接单独可聚焦、可激活
 ├── ZLRichDefines.swift    样式类型 ZLTextStyle、内嵌 View 配置 ZLRichWidget
 ├── ZLRichRule.swift       ZLRichRule / ZLRichMatch / ZLRichRuleContext / ZLRichParser
-├── ZLRichLabel.swift      基类：规则解析、渲染、内嵌 View、布局、截断、RTL、手势
+├── ZLRichLabel.swift      基类：属性定义、规则解析、渲染与缓存、内嵌 View（附件）
+├── ZLRichLabel+Layout.swift     布局：自适应高度、RTL 对齐、内嵌 View 的位置
+├── ZLRichLabel+Expand.swift     展开 / 收起：实际行数、按钮样式与位置、按钮点击
+├── ZLRichLabel+Gesture.swift    手势与点击：长按、双击、内嵌 View 的触摸、按坐标查找命中
 ├── ZLRichLabel+Selection.swift  选中复制：选中范围、拖柄、菜单、展示文字与原文的对应
 ├── ZLRichLabel+Decoration.swift 胶囊背景 / 渐变文字的属性与绘制
 ├── ZLRichText.swift      SwiftUI 封装（UIViewRepresentable），高度自适应
@@ -730,12 +737,27 @@ label.onExpandChanged = { [weak self] expanded in
 label.isExpanded = model.isExpanded
 ```
 
+默认点击「全文 / 收起」由内部自动切换。需要由外部决定时（例如跳转详情页、先请求完整内容、弹窗确认），设置 `onExpandTokenTap`：
+设置后点击按钮只回调它，**不会自动切换**，也不回调 `onExpandChanged`；外部需要切换时设置 `isExpanded` 或调用 `toggleExpanded()`。
+
+```swift
+label.onExpandTokenTap = { [weak self] label, wantsExpand in   // 点「全文」为 true，点「收起」为 false
+    if wantsExpand, self?.model.isLongArticle == true {
+        self?.openDetail()                                     // 不展开，跳转详情页
+    } else {
+        label.toggleExpanded()                                 // 按默认方式切换，并回调 onExpandChanged
+    }
+}
+label.onExpandTokenTap = nil                                   // 恢复内部自动切换
+```
+
 | API | 说明 |
 | --- | --- |
 | `expandToken` | 「展开」按钮，没设置的属性使用普通文本样式；为 nil（默认）时只显示省略符 |
 | `collapseToken` | 「收起」按钮，展开后拼接在末尾，可点击、有按下高亮；为 nil 时展开后不能收起 |
 | `isExpanded` | 展开状态。直接设置不回调 `onExpandChanged` |
-| `onExpandChanged` | 点击「全文 / 收起」后回调新的状态 |
+| `onExpandChanged` | 点击「全文 / 收起」后回调新的状态（设置了 `onExpandTokenTap` 时由外部切换后才回调） |
+| `onExpandTokenTap` | 可选，点击「全文 / 收起」按钮的外部处理，参数为 label 和想要的状态；设置后不自动切换，为 nil（默认）时内部自动切换 |
 | `toggleExpanded()` | 切换状态并回调，与点击效果相同 |
 | `numberOfLines` / `collapsedNumberOfLines` | 展开时 `numberOfLines` 读取为 0；设置的行数保存在 `collapsedNumberOfLines` |
 | `isTruncated` | 当前内容是否被截断（最近一次布局的结果） |
@@ -897,6 +919,7 @@ label.numberOfLines = 0;
 | `invalidateLayout(forAttachmentView:)` | `invalidateLayoutForAttachmentView:` |
 | `setNeedsRebuild(forRuleNamed:)` | `setNeedsRebuildForRuleNamed:` |
 | `onExpandChanged = { expanded in }` | `onExpandChanged = ^(BOOL expanded) {}` |
+| `onExpandTokenTap = { label, wantsExpand in }` | `onExpandTokenTap = ^(ZLRichLabel *label, BOOL wantsExpand) {}` |
 | `onLongPress = { info in }` / `onDoubleTap` | `onLongPress = ^(ZLRichGestureInfo *info) {}` |
 | `characterIndex(at:)` / `match(at:)` / `gestureInfo(at:)` | `characterIndexAtPoint:` / `matchAtPoint:` / `gestureInfoAtPoint:` |
 | `select(range:)` / `rawText(forDisplayRange:)` / `copySelection(raw:)` | `selectRange:` / `rawTextForDisplayRange:` / `copySelectionRaw:` |
@@ -960,7 +983,7 @@ Example 工程通过 Swift Package Manager 引用仓库根目录的本地包（`
 | 21 | 自定义 View 尺寸变化自动刷新排版：点击色块改 frame 变宽、点赞计数文字变化 |
 | 22 | 深色模式 / Dynamic Type：切换预览区域的外观与文字大小，文字、标签、规则内容和自定义 View 一起变化 |
 | 23 | 性能：600 个命中（含 200 张图片）的 label，对比改高亮 / 追加文字 / 只刷新一条规则 / `rebuild()` 的耗时与 handler 执行次数，`sizeThatFits` 缓存，1.5 万命中的解析耗时 |
-| 24 | 展开 / 收起：3 行截断显示「… 全文」，展开后显示「收起」；内容不足 3 行时不显示按钮 |
+| 24 | 展开 / 收起：3 行截断显示「… 全文」，展开后显示「收起」；内容不足 3 行时不显示按钮；24c / 24d 为 `collapseThreshold`；24e 为 `onExpandTokenTap`（点击按钮弹出选项，由外部决定展开、跳转详情或取消） |
 | 25 | 长按菜单（复制原文 / 展示文字、举报）、@提及与标签各自的长按、双击点赞、扩大点击热区 |
 | 26 | 选中复制：长按选词、拖柄调整，「复制」展示文字 /「复制原文」，下方实时显示 selectedText / selectedRawText |
 | 27 | 通用标签：`<b>` `<i>` `<u>` `<color value>` `<size value>` `<a href>`、自闭合 `<br/>` `<icon/>`、嵌套（内层继承外层样式、点击内层优先）、容错；卡片下方按嵌套缩进显示属性 |

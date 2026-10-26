@@ -1697,6 +1697,48 @@ static NSString *OCQuote(NSString *s) {
             };
         }];
     }
+
+    // 24e. 外部决定是否展开 / 收起：设置 onExpandTokenTap 后点击按钮不再自动切换
+    NSString *externalTitle = @"24e. onExpandTokenTap：外部决定是否展开 / 收起";
+    [self addCase:externalTitle source:longText configure:^(ZLTagRichLabel *v) {
+        v.numberOfLines = 3;
+        v.tagStyle = @{NSForegroundColorAttributeName: kBlue};
+        NSDictionary *tokenStyle = @{NSForegroundColorAttributeName: [UIColor systemTealColor],
+                                     NSFontAttributeName: [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold]};
+        v.expandToken = [[NSAttributedString alloc] initWithString:@"… 全文" attributes:tokenStyle];
+        v.collapseToken = [[NSAttributedString alloc] initWithString:@" 收起" attributes:tokenStyle];
+        v.onExpandChanged = ^(BOOL expanded) {
+            OCDemoViewController *strongSelf = weakSelf;
+            if (!strongSelf) { return; }
+            ZLTagInfo *info = [[ZLTagInfo alloc] initWithIndex:0 name:@"expand" text:expanded ? @"全文" : @"收起" raw:@""];
+            [strongSelf onTap:externalTitle info:info action:[NSString stringWithFormat:@"onExpandChanged(%@)", expanded ? @"YES" : @"NO"]];
+            [UIView animateWithDuration:0.25 animations:^{ [strongSelf.view layoutIfNeeded]; }];
+        };
+        v.onExpandTokenTap = ^(ZLRichLabel *label, BOOL wantsExpand) {
+            OCDemoViewController *strongSelf = weakSelf;
+            if (!strongSelf) { return; }
+            ZLTagInfo *info = [[ZLTagInfo alloc] initWithIndex:0 name:@"expandToken" text:wantsExpand ? @"全文" : @"收起" raw:@""];
+            [strongSelf onTap:externalTitle info:info
+                       action:[NSString stringWithFormat:@"onExpandTokenTap(wantsExpand: %@)", wantsExpand ? @"YES" : @"NO"]];
+            UIAlertController *sheet = [UIAlertController alertControllerWithTitle:wantsExpand ? @"展开全文？" : @"收起？"
+                                                                           message:@"设置了 onExpandTokenTap：由外部决定，不设置时内部自动切换"
+                                                                    preferredStyle:UIAlertControllerStyleActionSheet];
+            __weak ZLRichLabel *weakLabel = label;
+            [sheet addAction:[UIAlertAction actionWithTitle:wantsExpand ? @"展开（toggleExpanded）" : @"收起（toggleExpanded）"
+                                                      style:UIAlertActionStyleDefault
+                                                    handler:^(UIAlertAction *action) { [weakLabel toggleExpanded]; }]];
+            if (wantsExpand) {
+                [sheet addAction:[UIAlertAction actionWithTitle:@"跳转详情页（不展开）" style:UIAlertActionStyleDefault
+                                                        handler:^(UIAlertAction *action) {
+                    [weakSelf onTap:externalTitle info:info action:@"跳转详情页"];
+                }]];
+            }
+            [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+            sheet.popoverPresentationController.sourceView = label;
+            sheet.popoverPresentationController.sourceRect = label.expandTokenRect;
+            [strongSelf presentViewController:sheet animated:YES completion:nil];
+        };
+    }];
 }
 
 #pragma mark - 性能

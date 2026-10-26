@@ -1835,3 +1835,123 @@ class AdjustsFontSizeTests: XCTestCase {
         XCTAssertEqual(tapped, "@alice")
     }
 }
+
+/// 「展开 / 收起」按钮的外部处理 onExpandTokenTap
+class ExpandTokenTapTests: XCTestCase {
+
+    /// 模拟一次结束的点击（位置固定）
+    private final class FakeTap: UITapGestureRecognizer {
+        var point: CGPoint = .zero
+        override var state: UIGestureRecognizer.State {
+            get { return .ended }
+            set {}
+        }
+        override func location(in view: UIView?) -> CGPoint { return point }
+    }
+
+    private var window: UIWindow!
+
+    override func setUp() {
+        super.setUp()
+        window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        window.isHidden = false
+    }
+
+    override func tearDown() {
+        window.isHidden = true
+        window = nil
+        super.tearDown()
+    }
+
+    private func makeLabel() -> ZLRichLabel {
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: 220, height: 0))
+        label.numberOfLines = 2
+        label.update { v in
+            v.style = [.font: UIFont.systemFont(ofSize: 15)]
+            v.expandToken = NSAttributedString(string: "… 全文")
+            v.collapseToken = NSAttributedString(string: " 收起")
+            v.text = String(repeating: "Swift is a powerful and intuitive programming language. ", count: 6)
+        }
+        window.addSubview(label)
+        fit(label)
+        return label
+    }
+
+    private func fit(_ label: ZLRichLabel) {
+        let size = label.sizeThatFits(CGSize(width: 220, height: CGFloat.greatestFiniteMagnitude))
+        label.frame = CGRect(x: 0, y: 0, width: 220, height: size.height)
+        label.setNeedsLayout()
+        label.layoutIfNeeded()
+    }
+
+    /// 走真实的「展开」点击处理
+    private func tapExpand(_ label: ZLRichLabel) {
+        XCTAssertFalse(label.expandTokenRect.isEmpty, "应显示「展开」按钮")
+        let tap = FakeTap()
+        tap.point = CGPoint(x: label.expandTokenRect.midX, y: label.expandTokenRect.midY)
+        label.perform(NSSelectorFromString("handleExpandTap:"), with: tap)
+    }
+
+    /// 点击「收起」链接（展开后拼接在末尾）
+    private func tapCollapse(_ label: ZLRichLabel) {
+        guard let link = label.links.max(by: { $0.range.location < $1.range.location }) else { return XCTFail("没有「收起」") }
+        label.performTap(on: link)
+    }
+
+    func testDefaultTogglesAutomatically() {
+        let label = makeLabel()
+        var changes: [Bool] = []
+        label.onExpandChanged = { changes.append($0) }
+        tapExpand(label)
+        XCTAssertTrue(label.isExpanded, "没有设置 onExpandTokenTap：内部自动展开")
+        fit(label)
+        tapCollapse(label)
+        XCTAssertFalse(label.isExpanded, "内部自动收起")
+        XCTAssertEqual(changes, [true, false])
+    }
+
+    func testExternalHandlerDecidesAndBlocksAutoToggle() {
+        let label = makeLabel()
+        var taps: [Bool] = []
+        var changes: [Bool] = []
+        label.onExpandChanged = { changes.append($0) }
+        label.onExpandTokenTap = { tapped, wantsExpand in
+            XCTAssertTrue(tapped === label)
+            taps.append(wantsExpand)
+        }
+        tapExpand(label)
+        XCTAssertEqual(taps, [true], "点击「展开」回调 wantsExpand = true")
+        XCTAssertFalse(label.isExpanded, "设置了 onExpandTokenTap：不自动展开")
+        XCTAssertEqual(changes, [], "也不回调 onExpandChanged")
+
+        // 外部决定展开
+        label.isExpanded = true
+        fit(label)
+        tapCollapse(label)
+        XCTAssertEqual(taps, [true, false], "点击「收起」回调 wantsExpand = false")
+        XCTAssertTrue(label.isExpanded, "不自动收起")
+    }
+
+    func testExternalHandlerCanUseDefaultToggle() {
+        let label = makeLabel()
+        var changes: [Bool] = []
+        label.onExpandChanged = { changes.append($0) }
+        var allow = false
+        label.onExpandTokenTap = { tapped, _ in
+            if allow { tapped.toggleExpanded() }
+        }
+        tapExpand(label)
+        XCTAssertFalse(label.isExpanded, "外部拒绝")
+        allow = true
+        tapExpand(label)
+        XCTAssertTrue(label.isExpanded, "外部调用 toggleExpanded() 按默认方式展开")
+        XCTAssertEqual(changes, [true])
+
+        // 去掉外部处理后恢复默认
+        label.onExpandTokenTap = nil
+        fit(label)
+        tapCollapse(label)
+        XCTAssertFalse(label.isExpanded)
+        XCTAssertEqual(changes, [true, false])
+    }
+}

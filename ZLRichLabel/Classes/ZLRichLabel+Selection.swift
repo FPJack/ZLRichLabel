@@ -479,3 +479,35 @@ final class ZLSelectionHandleView: UIView {
         }
     }
 }
+
+// MARK: - UIResponder（选中复制菜单）
+
+extension ZLRichLabel {
+
+    /// 只在有选中时成为第一响应者
+    open override var canBecomeFirstResponder: Bool {
+        return isSelectable && hasSelection
+    }
+
+    open override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        guard isSelectable, hasSelection else { return false }
+        if action == #selector(copy(_:)) || action == #selector(zl_copyRawText(_:)) { return true }
+        if action == #selector(selectAll(_:)) { return selectedRange.length < contentDisplayLength }
+        return false
+    }
+
+    /// 复制选中的展示文字
+    open override func copy(_ sender: Any?) {
+        copySelection(raw: false)
+    }
+
+    open override func selectAll(_ sender: Any?) {
+        reshowsSelectionMenu = true
+        selectAllText()
+    }
+
+    /// 复制选中范围对应的原文（菜单项「复制原文」）
+    @objc open func zl_copyRawText(_ sender: Any?) {
+        copySelection(raw: true)
+    }
+}

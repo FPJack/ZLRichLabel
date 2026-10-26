@@ -196,8 +196,11 @@ open class ZLRichLabel: ZLAttributedLabel {
     /// 列表中可在这里记录状态并刷新行高（例如 `tableView.performBatchUpdates(nil)`）
     open var onExpandChanged: ((Bool) -> Void)?
 
-    /// 收起时的行数（即设置的 `numberOfLines`，展开时也不变）
-    public var collapsedNumberOfLines: Int { return super.numberOfLines }
+    /// 点击「展开 / 收起」按钮的外部处理，参数为 label 和这次点击想要的状态（点「展开」为 true，点「收起」为 false）。
+    /// - 为 nil（默认）：内部自动切换展开状态并回调 `onExpandChanged`
+    /// - 设置后：只回调这里，不自动切换（也不回调 `onExpandChanged`），由外部决定，例如：
+    ///   跳转详情页、先请求完整内容，或者设置 `isExpanded` / 调用 `toggleExpanded()` 按默认方式切换
+    open var onExpandTokenTap: ((_ label: ZLRichLabel, _ wantsExpand: Bool) -> Void)?
 
     /// 超过多少行才折叠，默认 0（等于 `numberOfLines`：超过 `numberOfLines` 行就折叠）。
     /// 例如 `numberOfLines = 3`、`collapseThreshold = 5`：内容不超过 5 行时完整显示（没有「展开」按钮），
@@ -211,20 +214,11 @@ open class ZLRichLabel: ZLAttributedLabel {
         }
     }
 
-    /// 某个文字宽度下实际使用的行数：展开时为 0；设置了 `collapseThreshold` 且内容不超过它时为 0（完整显示）
-    func effectiveNumberOfLines(forTextWidth width: CGFloat) -> Int {
-        if isExpanded { return 0 }
-        let collapsed = super.numberOfLines
-        guard collapsed > 0, collapseThreshold > collapsed, width > 0,
-              let attr = attributedText, attr.length > 0 else { return collapsed }
-        return lineCount(of: attr, width: width) <= collapseThreshold ? 0 : collapsed
-    }
-
     /// 当前内容是否被截断（最近一次布局的结果）
-    public private(set) var isTruncated: Bool = false
+    public internal(set) var isTruncated: Bool = false
 
     /// 「展开」按钮的可点击区域（label 坐标系，已适当扩大），没有显示时为 `.zero`
-    public private(set) var expandTokenRect: CGRect = .zero
+    public internal(set) var expandTokenRect: CGRect = .zero
 
     // MARK: 长按 / 双击
 
@@ -246,7 +240,7 @@ open class ZLRichLabel: ZLAttributedLabel {
     }()
 
     /// 双击手势，`onDoubleTap` 为 nil 时为 nil
-    public private(set) var richDoubleTapGesture: UITapGestureRecognizer?
+    public internal(set) var richDoubleTapGesture: UITapGestureRecognizer?
 
     // MARK: 选中复制（实现见 ZLRichLabel+Selection.swift）
 
@@ -297,12 +291,6 @@ open class ZLRichLabel: ZLAttributedLabel {
     var selectionEditMenu: AnyObject?
     var menuHideObserver: NSObjectProtocol?
 
-    /// 切换展开状态并回调 `onExpandChanged`，与点击「展开 / 收起」的效果相同
-    open func toggleExpanded() {
-        isExpanded.toggle()
-        onExpandChanged?(isExpanded)
-    }
-
     // MARK: 规则
 
     /// 外部添加的规则（命中内容交给规则 handler 处理），重叠时按优先级取舍，见 `ZLRichRule`
@@ -350,9 +338,9 @@ open class ZLRichLabel: ZLAttributedLabel {
     // MARK: Private
 
     static let attachmentKey = NSAttributedString.Key("ZLRichLabelAttachmentID")
-    private static let attachmentChar: unichar = 0xFFFC
+    static let attachmentChar: unichar = 0xFFFC
 
-    private final class Attachment {
+    final class Attachment {
         let id: Int
         let view: UIView
         let alignment: ZLRichWidgetAlignment
@@ -417,7 +405,7 @@ open class ZLRichLabel: ZLAttributedLabel {
         }
     }
 
-    private var attachments: [Int: Attachment] = [:]
+    var attachments: [Int: Attachment] = [:]
     private var nextAttachmentId = 0
     private var batchUpdateDepth = 0
     private var isRebuilding = false
@@ -426,7 +414,7 @@ open class ZLRichLabel: ZLAttributedLabel {
     public let statistics = ZLRichLabelStatistics()
 
     /// 单个命中的渲染结果（handler / builder 的输出 + 创建的 View），下次渲染时直接复用
-    private final class RenderedMatch {
+    final class RenderedMatch {
         let rule: ZLRichRule
         let range: NSRange
         let index: Int
@@ -473,7 +461,7 @@ open class ZLRichLabel: ZLAttributedLabel {
     private var renderCache: [RenderKey: RenderedMatch] = [:]
 
     /// 每个命中在展示文字（attributedText）中的范围，按位置排序，用于手势定位
-    private var displayMatches: [(range: NSRange, rendered: RenderedMatch)] = []
+    var displayMatches: [(range: NSRange, rendered: RenderedMatch)] = []
 
     /// 排版缓存在 ZLAttributedLabel 中，这里只统计
     override func didCreateFramesetter() {
@@ -507,7 +495,7 @@ open class ZLRichLabel: ZLAttributedLabel {
         activeLinkAttributes = [:]
         inactiveLinkAttributes = nil
         isUserInteractionEnabled = true
-        setupExpandGesture()
+        setupGestures()
         // xib / storyboard 中设置的 text 会在 super.init(coder:) 期间就被解析，
         // 此时链接样式还是默认的（蓝色下划线），这里按最终配置重新渲染一次
         if !rawText.isEmpty { rebuild() }
@@ -804,7 +792,7 @@ open class ZLRichLabel: ZLAttributedLabel {
             applyContentSizeScaling(to: styled, includesAttachments: false)
             let range = NSRange(location: result.length, length: styled.length)
             result.append(styled)
-            linkItems.append((range, nil, { [weak self] in self?.toggleExpanded() }))
+            linkItems.append((range, nil, { [weak self] in self?.expandTokenTapped(wantsExpand: false) }))
         }
         applyContentSizeScaling(to: token, includesAttachments: false)
         attributedTruncationToken = token
@@ -985,7 +973,7 @@ open class ZLRichLabel: ZLAttributedLabel {
     }
 
     /// 外部直接修改了 View 尺寸（与上次布局设置的不同）的 Attachment
-    private func externallyResizedAttachments() -> [Int: CGSize] {
+    func externallyResizedAttachments() -> [Int: CGSize] {
         var changes: [Int: CGSize] = [:]
         for attachment in attachments.values {
             let current = attachment.view.bounds.size
@@ -1005,7 +993,7 @@ open class ZLRichLabel: ZLAttributedLabel {
     }
 
     /// 更新占位尺寸：只替换对应占位符的 CTRunDelegate，链接与其他内容不变
-    private func applyAttachmentSizes(_ sizes: [Int: CGSize]) {
+    func applyAttachmentSizes(_ sizes: [Int: CGSize]) {
         var changed = Set<Int>()
         for (id, size) in sizes {
             guard let attachment = attachments[id] else { continue }
@@ -1071,429 +1059,24 @@ open class ZLRichLabel: ZLAttributedLabel {
 
     // MARK: Layout
 
-    private var lastLayoutWidth: CGFloat = 0
-
-    open override func layoutSubviews() {
-        super.layoutSubviews()
-        if bounds.width != lastLayoutWidth {
-            lastLayoutWidth = bounds.width
-            // 宽度变化后高度可能变化（Auto Layout 自适应高度）
-            invalidateIntrinsicContentSize()
-        }
-        layoutAttachmentViews()
-        layoutExpandToken()
-        if hasSelection { updateSelectionAppearance() }
-    }
-
-    /// 支持 Auto Layout 自适应高度：宽度由约束决定，高度根据内容计算
-    open override var intrinsicContentSize: CGSize {
-        let width = preferredMaxLayoutWidth > 0 ? preferredMaxLayoutWidth : bounds.width
-        guard width > 0, attributedText != nil else { return super.intrinsicContentSize }
-        let size = sizeThatFits(CGSize(width: width, height: CGFloat.greatestFiniteMagnitude))
-        return CGSize(width: UIView.noIntrinsicMetric, height: ceil(size.height))
-    }
+    var richLastLayoutWidth: CGFloat = 0
 
     /// 尺寸失效时回调（SwiftUI 封装 `ZLRichText` 用它在内容变化后重新计算高度）
     var intrinsicSizeObserver: (() -> Void)?
 
-    open override func invalidateIntrinsicContentSize() {
-        super.invalidateIntrinsicContentSize()
-        intrinsicSizeObserver?()
-    }
-
     open override var bounds: CGRect {
         didSet { if bounds.size != oldValue.size { setNeedsLayout() } }
-    }
-
-    /// 展开时读取为 0（显示全部）；设置的值保存为收起时的行数（`collapsedNumberOfLines`）。
-    /// 设置了 `collapseThreshold` 且内容（按当前宽度）不超过它时也读取为 0
-    open override var numberOfLines: Int {
-        get { return effectiveNumberOfLines(forTextWidth: bounds.width - textInsets.left - textInsets.right) }
-        set {
-            super.numberOfLines = newValue
-            invalidateIntrinsicContentSize()
-            setNeedsLayout()
-            setNeedsDisplay()
-        }
-    }
-
-    /// `.natural` 默认按界面方向对齐，阿拉伯语 / 希伯来语等 RTL 文本在 LTR 界面中会错误地靠左。
-    /// 这里把 `.natural` 按内容的书写方向解析为 `.left` / `.right`
-    open override var textAlignment: NSTextAlignment {
-        get {
-            let value = super.textAlignment
-            guard value == .natural else { return value }
-            return isRightToLeft ? .right : .left
-        }
-        set {
-            super.textAlignment = newValue
-            setNeedsLayout()
-            setNeedsDisplay()
-        }
     }
 
     /// 当前内容是否为从右到左（RTL）书写
     /// 规则与 CoreText 自然段落方向一致：取第一个强方向字符；没有强方向字符时跟随界面布局方向
     public private(set) var isRightToLeft: Bool = false
 
-    private static func detectRightToLeft(_ string: String) -> Bool? {
-        for scalar in string.unicodeScalars {
-            let v = scalar.value
-            // Hebrew, Arabic, Syriac, Thaana, NKo, Samaritan, Mandaic, Arabic Ext, 表现形式
-            if (0x0590...0x08FF).contains(v) || (0xFB1D...0xFDFF).contains(v) || (0xFE70...0xFEFF).contains(v)
-                || (0x10800...0x10FFF).contains(v) || (0x1E800...0x1EFFF).contains(v) {
-                // 阿拉伯-印度数字（0660–0669、06F0–06F9）是弱方向字符，跳过
-                if (0x0660...0x0669).contains(v) || (0x06F0...0x06F9).contains(v) { continue }
-                return true
-            }
-            if CharacterSet.letters.contains(scalar) {
-                return false
-            }
-        }
-        return nil
-    }
-
-    /// 与 ZLAttributedLabel 的绘制逻辑保持一致，计算自定义 View 的位置
-    private func layoutAttachmentViews() {
-        // 外部直接修改了 View 的尺寸（例如点击后展开）：先更新占位尺寸再布局
-        let resized = externallyResizedAttachments()
-        if !resized.isEmpty { applyAttachmentSizes(resized) }
-
-        attachments.values.forEach { $0.view.isHidden = true }
-        guard !attachments.isEmpty,
-              let attr = attributedText, attr.length > 0,
-              bounds.width > 0, bounds.height > 0 else { return }
-
-        let textRect = self.textRect(forBounds: bounds, limitedToNumberOfLines: numberOfLines)
-        let (lines, origins) = frameLines(for: attr, in: textRect)
-        guard !lines.isEmpty else { return }
-
-        let count = numberOfLines > 0 ? min(numberOfLines, lines.count) : lines.count
-
-        let truncateLastLine = lineBreakMode == .byTruncatingHead
-            || lineBreakMode == .byTruncatingMiddle
-            || lineBreakMode == .byTruncatingTail
-        let fontDescender = (font ?? UIFont.systemFont(ofSize: 17)).descender
-        let width = Double(textRect.width)
-
-        for lineIndex in 0..<count {
-            var line = lines[lineIndex]
-            var lineString: NSAttributedString = attr
-
-            var descent: CGFloat = 0
-            CTLineGetTypographicBounds(line, nil, &descent, nil)
-
-            if lineIndex == count - 1 && truncateLastLine,
-               let truncated = truncatedLine(for: line, in: attr, lineCount: count, width: width) {
-                line = truncated.line
-                lineString = truncated.string
-            }
-
-            let penOffset = CGFloat(CTLineGetPenOffsetForFlush(line, flushFactor, width))
-            let baselineCT = origins[lineIndex].y - descent - fontDescender
-            let baselineY = textRect.minY + textRect.height - baselineCT
-            let string = lineString.string as NSString
-
-            guard let runs = CTLineGetGlyphRuns(line) as? [CTRun] else { continue }
-            for run in runs {
-                let attrs = CTRunGetAttributes(run) as NSDictionary
-                guard let id = attrs[ZLRichLabel.attachmentKey.rawValue] as? Int,
-                      let attachment = attachments[id] else { continue }
-                let range = CTRunGetStringRange(run)
-                guard range.location >= 0, range.location < string.length,
-                      string.character(at: range.location) == ZLRichLabel.attachmentChar,
-                      CTRunGetGlyphCount(run) > 0 else { continue }
-
-                var position = CGPoint.zero
-                CTRunGetPositions(run, CFRange(location: 0, length: 1), &position)
-
-                attachment.view.frame = CGRect(x: textInsets.left + penOffset + position.x,
-                                               y: baselineY - attachment.ascent,
-                                               width: attachment.size.width,
-                                               height: attachment.size.height)
-                attachment.appliedSize = attachment.view.bounds.size
-                attachment.view.isHidden = false
-            }
-        }
-    }
-
-    // MARK: 展开 / 收起
-
-    private static let expandTokenKey = NSAttributedString.Key("ZLRichLabelExpandToken")
-
-    /// 按钮富文本：先铺普通文本样式，再覆盖按钮自己的属性
-    private static func styledToken(_ token: NSAttributedString, baseStyle: ZLTextStyle) -> NSMutableAttributedString {
-        let styled = NSMutableAttributedString(string: token.string, attributes: baseStyle)
-        token.enumerateAttributes(in: NSRange(location: 0, length: token.length), options: []) { attrs, range, _ in
-            styled.addAttributes(attrs, range: range)
-        }
-        return styled
-    }
-
-    private lazy var gestureDelegate = RichGestureDelegate(label: self)
+    lazy var gestureDelegate = RichGestureDelegate(label: self)
     /// 有选中时点击 label：取消选中（同时吞掉这次点击，不触发链接）
-    fileprivate var selectionDismissTap: UITapGestureRecognizer?
+    var selectionDismissTap: UITapGestureRecognizer?
 
-    @objc private func handleSelectionDismissTap(_ gesture: UITapGestureRecognizer) {
-        guard gesture.state == .ended else { return }
-        clearSelection()
-    }
-    private var expandTapGesture: UITapGestureRecognizer?
-
-    private func setupExpandGesture() {
-        // 基类的链接长按只作用于链接，这里统一由 richLongPressGesture 处理
-        longPressGestureRecognizer?.isEnabled = false
-        addGestureRecognizer(richLongPressGesture)
-
-        let dismiss = UITapGestureRecognizer(target: self, action: #selector(handleSelectionDismissTap(_:)))
-        dismiss.delegate = gestureDelegate
-        selectionDismissTap = dismiss
-        addGestureRecognizer(dismiss)
-
-        let tap = UITapGestureRecognizer(target: self, action: #selector(handleExpandTap(_:)))
-        tap.delegate = gestureDelegate
-        expandTapGesture = tap
-        // 只接收「展开」按钮区域内的触摸；延迟下发，避免按钮下方被截断的链接先出现按下高亮
-        tap.delaysTouchesBegan = true
-        addGestureRecognizer(tap)
-    }
-
-    private func updateDoubleTapGesture() {
-        if onDoubleTap == nil {
-            if let gesture = richDoubleTapGesture { removeGestureRecognizer(gesture) }
-            richDoubleTapGesture = nil
-            return
-        }
-        guard richDoubleTapGesture == nil else { return }
-        let gesture = UITapGestureRecognizer(target: self, action: #selector(handleRichDoubleTap(_:)))
-        gesture.numberOfTapsRequired = 2
-        gesture.delegate = gestureDelegate
-        // 默认 delaysTouchesEnded = true：双击成功时取消链接点击，失败后再交给链接
-        addGestureRecognizer(gesture)
-        expandTapGesture?.require(toFail: gesture)
-        richDoubleTapGesture = gesture
-    }
-
-    @objc private func handleRichLongPress(_ gesture: UILongPressGestureRecognizer) {
-        let location = gesture.location(in: self)
-        switch gesture.state {
-        case .began:
-            if let handler = longPressHandler(at: location) {
-                handler()
-                return
-            }
-            if isSelectable {
-                beginSelection(at: location)
-                return
-            }
-            onLongPress?(gestureInfo(at: location))
-        case .changed:
-            if selectionAnchor != nil { extendSelection(to: location) }
-        case .ended, .cancelled:
-            if selectionAnchor != nil {
-                selectionAnchor = nil
-                showSelectionMenu()
-            }
-        default:
-            break
-        }
-    }
-
-    @objc private func handleRichDoubleTap(_ gesture: UITapGestureRecognizer) {
-        guard gesture.state == .ended else { return }
-        onDoubleTap?(gestureInfo(at: gesture.location(in: self)))
-    }
-
-    /// 长按是否需要开始：有 `onLongPress` 或该位置的命中设置了 `ctx.onLongPress`
-    fileprivate func shouldBeginLongPress(at location: CGPoint) -> Bool {
-        if onLongPress != nil || isSelectable { return true }
-        return longPressHandler(at: location) != nil
-    }
-
-    /// 某个位置的命中长按：先找覆盖该位置的分段（后添加的优先），再用命中整体的 onLongPress
-    private func longPressHandler(at point: CGPoint) -> (() -> Void)? {
-        guard let item = displayMatch(at: point) else { return nil }
-        let index = characterIndex(at: point)
-        if index != NSNotFound {
-            let offset = index - item.range.location
-            if let link = item.rendered.links.last(where: { $0.onLongPress != nil && NSLocationInRange(offset, $0.range) }),
-               let handler = link.onLongPress {
-                return { handler(item.rendered.matchInfo) }
-            }
-        }
-        guard let handler = item.rendered.onLongPress else { return nil }
-        return { handler(item.rendered.matchInfo) }
-    }
-
-    // MARK: UIResponder（选中复制菜单）
-
-    /// 只在有选中时成为第一响应者
-    open override var canBecomeFirstResponder: Bool {
-        return isSelectable && hasSelection
-    }
-
-    open override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        guard isSelectable, hasSelection else { return false }
-        if action == #selector(copy(_:)) || action == #selector(zl_copyRawText(_:)) { return true }
-        if action == #selector(selectAll(_:)) { return selectedRange.length < contentDisplayLength }
-        return false
-    }
-
-    /// 复制选中的展示文字
-    open override func copy(_ sender: Any?) {
-        copySelection(raw: false)
-    }
-
-    open override func selectAll(_ sender: Any?) {
-        reshowsSelectionMenu = true
-        selectAllText()
-    }
-
-    /// 复制选中范围对应的原文（菜单项「复制原文」）
-    @objc open func zl_copyRawText(_ sender: Any?) {
-        copySelection(raw: true)
-    }
-
-    /// 基类在点位有链接时直接返回 label 自身，内嵌的自定义 View（自带手势 / UIControl）收不到触摸。
-    /// 这里先让「自己处理交互」的子 View 命中；没有自己交互的 View（以及只带内部点击的 View）仍交给链接处理
-    open override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        if isUserInteractionEnabled, !isHidden, alpha >= 0.01, self.point(inside: point, with: event) {
-            for subview in subviews.reversed()
-            where !subview.isHidden && subview.isUserInteractionEnabled && subview.alpha >= 0.01 {
-                guard let hit = subview.hitTest(convert(point, to: subview), with: event),
-                      handlesOwnTouches(hit) else { continue }
-                return hit
-            }
-        }
-        return super.hitTest(point, with: event)
-    }
-
-    /// 从命中的 View 向上到 label（不含），是否有 View 自己处理触摸（UIControl 或有外部添加的手势）
-    private func handlesOwnTouches(_ view: UIView) -> Bool {
-        var current: UIView? = view
-        while let v = current, v !== self {
-            if v is UIControl { return true }
-            if v.gestureRecognizers?.contains(where: { $0.isEnabled && !($0 is TagTapGestureRecognizer) }) == true {
-                return true
-            }
-            current = v.superview
-        }
-        return false
-    }
-
-    /// 选中时拖柄在 bounds 外，也要能接收触摸
-    open override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        if super.point(inside: point, with: event) { return true }
-        return selectionHandles.contains { !$0.isHidden && $0.frame.contains(point) }
-    }
-
-    // MARK: 按坐标定位
-
-    /// 某个位置的手势信息（字符下标、所在命中等）
-    @objc(gestureInfoAtPoint:)
-    open func gestureInfo(at point: CGPoint) -> ZLRichGestureInfo {
-        let index = characterIndex(at: point)
-        let item = displayMatch(at: point)
-        let display = (attributedText?.string ?? "") as NSString
-        let matchText = item.map { NSMaxRange($0.range) <= display.length ? display.substring(with: $0.range) : "" }
-        return ZLRichGestureInfo(location: point, characterIndex: index, match: item?.rendered.matchInfo,
-                                 matchDisplayText: matchText, rawText: rawText, displayText: display as String)
-    }
-
-    /// 某个位置所在的规则命中，不在命中上时为 nil。
-    /// `extendsLinkTouchArea` 为 true 时，可交互的命中（有 onTap / onLongPress）点击区域向四周扩大最多 15pt
-    @objc(matchAtPoint:)
-    open func match(at point: CGPoint) -> ZLRichMatch? {
-        return displayMatch(at: point)?.rendered.matchInfo
-    }
-
-    private func displayMatch(at point: CGPoint) -> (range: NSRange, rendered: RenderedMatch)? {
-        let index = characterIndex(at: point)
-        // 按在文字上时以这个字为准：不再向四周扩大查找，避免按在普通文字上却命中了上下行的链接
-        guard index == NSNotFound else { return displayMatch(atCharacter: index) }
-        guard extendsLinkTouchArea else { return nil }
-        // 与 ZLAttributedLabel.link(at:) 一致：由近到远在 8 个方向上查找可交互的命中
-        for radius: CGFloat in [2.5, 5, 7.5, 12.5, 15] {
-            let diagonal = (2 * radius * radius).squareRoot()
-            let deltas = [CGPoint(x: 0, y: -radius), CGPoint(x: 0, y: radius), CGPoint(x: -radius, y: 0),
-                          CGPoint(x: radius, y: 0), CGPoint(x: -diagonal, y: -diagonal), CGPoint(x: -diagonal, y: diagonal),
-                          CGPoint(x: diagonal, y: diagonal), CGPoint(x: diagonal, y: -diagonal)]
-            for delta in deltas {
-                let candidate = CGPoint(x: point.x + delta.x, y: point.y + delta.y)
-                if let item = displayMatch(atCharacter: characterIndex(at: candidate)),
-                   item.rendered.onTap != nil || item.rendered.onLongPress != nil || !item.rendered.links.isEmpty {
-                    return item
-                }
-            }
-        }
-        return nil
-    }
-
-    /// 某个字符所在命中在展示文字中的范围
-    func displayMatchRange(atCharacter index: Int) -> NSRange? {
-        return displayMatch(atCharacter: index)?.range
-    }
-
-    private func displayMatch(atCharacter index: Int) -> (range: NSRange, rendered: RenderedMatch)? {
-        guard index != NSNotFound else { return nil }
-        // displayMatches 按位置排序：二分查找
-        var low = 0
-        var high = displayMatches.count - 1
-        while low <= high {
-            let mid = (low + high) / 2
-            let range = displayMatches[mid].range
-            if index < range.location { high = mid - 1 } else if index >= NSMaxRange(range) { low = mid + 1 } else {
-                return displayMatches[mid]
-            }
-        }
-        return nil
-    }
-
-    @objc private func handleExpandTap(_ gesture: UITapGestureRecognizer) {
-        guard gesture.state == .ended, !isExpanded, expandTokenRect.contains(gesture.location(in: self)) else { return }
-        toggleExpanded()
-    }
-
-    /// 计算是否被截断，以及「展开」按钮在 label 中的位置（与绘制的截断行一致）
-    private func layoutExpandToken() {
-        isTruncated = false
-        expandTokenRect = .zero
-        let lineLimit = numberOfLines
-        guard lineLimit > 0, let attr = attributedText, attr.length > 0, bounds.width > 0, bounds.height > 0 else { return }
-
-        let textRect = self.textRect(forBounds: bounds, limitedToNumberOfLines: lineLimit)
-        let (lines, origins) = frameLines(for: attr, in: textRect)
-        guard !lines.isEmpty else { return }
-        let count = min(lineLimit, lines.count)
-        let lastLine = lines[count - 1]
-        let lastRange = CTLineGetStringRange(lastLine)
-        isTruncated = lastRange.location + lastRange.length < attr.length
-        guard isTruncated, !isExpanded, expandToken != nil,
-              let truncated = truncatedLine(for: lastLine, in: attr, lineCount: count, width: Double(textRect.width))
-        else { return }
-
-        var descent: CGFloat = 0
-        CTLineGetTypographicBounds(lastLine, nil, &descent, nil)
-        let fontDescender = (font ?? UIFont.systemFont(ofSize: 17)).descender
-        let penOffset = CGFloat(CTLineGetPenOffsetForFlush(truncated.line, flushFactor, Double(textRect.width)))
-        let baselineY = textRect.minY + textRect.height - (origins[count - 1].y - descent - fontDescender)
-
-        var rect = CGRect.null
-        for run in (CTLineGetGlyphRuns(truncated.line) as? [CTRun]) ?? [] {
-            let attrs = CTRunGetAttributes(run) as NSDictionary
-            guard attrs[ZLRichLabel.expandTokenKey.rawValue] != nil, CTRunGetGlyphCount(run) > 0 else { continue }
-            var position = CGPoint.zero
-            CTRunGetPositions(run, CFRange(location: 0, length: 1), &position)
-            var ascent: CGFloat = 0
-            var runDescent: CGFloat = 0
-            let width = CGFloat(CTRunGetTypographicBounds(run, CFRange(location: 0, length: 0), &ascent, &runDescent, nil))
-            rect = rect.union(CGRect(x: textInsets.left + penOffset + position.x, y: baselineY - ascent,
-                                     width: width, height: ascent + runDescent))
-        }
-        guard !rect.isNull else { return }
-        // 适当扩大点击区域
-        expandTokenRect = rect.insetBy(dx: -8, dy: -6)
-    }
+    var expandTapGesture: UITapGestureRecognizer?
 
 }
 
@@ -1531,48 +1114,4 @@ public extension UIView {
             parent = current.superview
         }
     }
-}
-
-/// label 自己添加的手势的代理（基类的链接长按手势有自己的代理，这里单独处理）：
-/// - 「展开」点击：只接收按钮区域内的触摸，其他位置交给 ZLAttributedLabel 处理链接
-/// - 长按：有 `onLongPress` 或该位置的命中设置了 `ctx.onLongPress` 时才开始
-private final class RichGestureDelegate: NSObject, UIGestureRecognizerDelegate {
-    weak var label: ZLRichLabel?
-
-    init(label: ZLRichLabel) {
-        self.label = label
-        super.init()
-    }
-
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        guard let label = label else { return false }
-        if gestureRecognizer === label.richLongPressGesture || gestureRecognizer === label.richDoubleTapGesture {
-            return true
-        }
-        if gestureRecognizer === label.selectionDismissTap {
-            // 只在有选中、且没有点到拖柄时接收
-            guard label.hasSelection else { return false }
-            return !label.selectionHandles.contains { !$0.isHidden && $0.frame.contains(touch.location(in: label)) }
-        }
-        guard !label.isExpanded, label.expandTokenRect != .zero else { return false }
-        return label.expandTokenRect.contains(touch.location(in: label))
-    }
-
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard let label = label else { return false }
-        if gestureRecognizer === label.richLongPressGesture {
-            return label.shouldBeginLongPress(at: gestureRecognizer.location(in: label))
-        }
-        return true
-    }
-
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
-                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        return false
-    }
-}
-
-/// 自定义 View 的点击手势（携带点击动作）
-private final class TagTapGestureRecognizer: UITapGestureRecognizer {
-    var tapAction: (() -> Void)?
 }
