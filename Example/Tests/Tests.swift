@@ -2499,3 +2499,102 @@ class TruncationTokenTests: XCTestCase {
         XCTAssertLessThan(red.maxX, black.minX + 2, "截断符在文字左侧")
     }
 }
+
+// MARK: - 胶囊背景 / 渐变与 .baselineOffset
+
+class DecorationBaselineOffsetTests: XCTestCase {
+
+    /// 渲染后红色背景与白色文字的外接矩形（label 坐标，3x 采样）
+    private func badgeRects(offset: CGFloat) -> (box: CGRect, text: CGRect) {
+        let label = ZLTagRichLabel(frame: CGRect(x: 0, y: 0, width: 300, height: 60))
+        label.numberOfLines = 0
+        label.font = .systemFont(ofSize: 15)
+        label.textColor = .black
+        label.tagConfiguration = .anyTags
+        var style: ZLTextStyle = [.font: UIFont.boldSystemFont(ofSize: 11), .foregroundColor: UIColor.white,
+                                  .zlBackground: ZLTextBackground(fillColor: .red, cornerRadius: 0,
+                                                                  padding: UIEdgeInsets(top: 2, left: 4, bottom: 2, right: 4))]
+        if offset != 0 { style[.baselineOffset] = offset }
+        label.tagStyles = ["new": style]
+        label.text = "Swift <new>NEW</new>"
+        label.frame.size.height = label.sizeThatFits(CGSize(width: 300, height: CGFloat.greatestFiniteMagnitude)).height + 20
+        label.layoutIfNeeded()
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 3
+        format.preferredRange = .standard
+        let image = UIGraphicsImageRenderer(bounds: label.bounds, format: format).image { label.layer.render(in: $0.cgContext) }
+        guard let cg = image.cgImage, let data = cg.dataProvider?.data, let ptr = CFDataGetBytePtr(data) else { return (.null, .null) }
+        let little = cg.bitmapInfo.contains(.byteOrder32Little)
+        var red = CGRect.null
+        var white = CGRect.null
+        for y in 0..<cg.height {
+            for x in 0..<cg.width {
+                let i = y * cg.bytesPerRow + x * 4
+                let (r, g, b, a) = little ? (ptr[i + 2], ptr[i + 1], ptr[i], ptr[i + 3]) : (ptr[i], ptr[i + 1], ptr[i + 2], ptr[i + 3])
+                let pixel = CGRect(x: CGFloat(x) / 3, y: CGFloat(y) / 3, width: 1.0 / 3, height: 1.0 / 3)
+                if a > 200 && r > 200 && g < 60 && b < 60 { red = red.union(pixel) }
+                if a > 200 && r > 200 && g > 200 && b > 200 { white = white.union(pixel) }
+            }
+        }
+        return (red, white)
+    }
+
+    func testBackgroundFollowsBaselineOffset() {
+        for offset: CGFloat in [0, 3, -2] {
+            let (box, text) = badgeRects(offset: offset)
+            XCTAssertFalse(box.isNull || text.isNull, "offset \(offset)：背景和文字都画出来了")
+            let top = text.minY - box.minY
+            let bottom = box.maxY - text.maxY
+            XCTAssertEqual(top, bottom, accuracy: 0.7, "offset \(offset)：文字在背景中垂直居中（上 \(top) / 下 \(bottom)）")
+            XCTAssertEqual(text.minX - box.minX, box.maxX - text.maxX, accuracy: 0.7, "offset \(offset)：水平居中")
+        }
+        let plain = badgeRects(offset: 0).box
+        let raised = badgeRects(offset: 3).box
+        XCTAssertEqual(plain.minY - raised.minY, 3, accuracy: 0.5, "背景随 baselineOffset 上移")
+        XCTAssertEqual(plain.size.height, raised.size.height, accuracy: 0.5, "背景大小不变")
+    }
+
+    func testGradientFollowsBaselineOffset() {
+        // 竖向渐变：上红下蓝。上移后文字顶部仍应是红色、底部仍应是蓝色
+        func colors(offset: CGFloat) -> (top: (UInt8, UInt8), bottom: (UInt8, UInt8)) {
+            let label = ZLTagRichLabel(frame: CGRect(x: 0, y: 0, width: 300, height: 80))
+            label.numberOfLines = 0
+            label.tagConfiguration = .anyTags
+            var style: ZLTextStyle = [.font: UIFont.boldSystemFont(ofSize: 40),
+                                      .zlGradient: ZLTextGradient(colors: [.red, .blue], startPoint: CGPoint(x: 0.5, y: 0),
+                                                                  endPoint: CGPoint(x: 0.5, y: 1))]
+            if offset != 0 { style[.baselineOffset] = offset }
+            label.tagStyles = ["g": style]
+            label.text = "<g>IIII</g>"
+            label.layoutIfNeeded()
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            format.preferredRange = .standard
+            let image = UIGraphicsImageRenderer(bounds: label.bounds, format: format).image { label.layer.render(in: $0.cgContext) }
+            let cg = image.cgImage!
+            let ptr = CFDataGetBytePtr(cg.dataProvider!.data)!
+            let little = cg.bitmapInfo.contains(.byteOrder32Little)
+            var ink: [(y: Int, r: UInt8, b: UInt8)] = []
+            for y in 0..<cg.height {
+                for x in 0..<cg.width {
+                    let i = y * cg.bytesPerRow + x * 4
+                    let (r, b, a) = little ? (ptr[i + 2], ptr[i], ptr[i + 3]) : (ptr[i], ptr[i + 2], ptr[i + 3])
+                    if a > 250 { ink.append((y, r, b)) }
+                }
+            }
+            let minY = ink.map { $0.y }.min() ?? 0
+            let maxY = ink.map { $0.y }.max() ?? 0
+            let top = ink.first { $0.y == minY }!
+            let bottom = ink.first { $0.y == maxY }!
+            return ((top.r, top.b), (bottom.r, bottom.b))
+        }
+        // 渐变区域跟着文字移动：上移前后，文字顶部 / 底部的颜色相同
+        let plain = colors(offset: 0)
+        let raised = colors(offset: 12)
+        for (a, b, name) in [(plain.top, raised.top, "顶部"), (plain.bottom, raised.bottom, "底部")] {
+            XCTAssertEqual(Double(a.0), Double(b.0), accuracy: 20, "\(name)红色分量一致：\(a) vs \(b)")
+            XCTAssertEqual(Double(a.1), Double(b.1), accuracy: 20, "\(name)蓝色分量一致：\(a) vs \(b)")
+        }
+        XCTAssertGreaterThan(raised.bottom.1, raised.bottom.0, "上移后文字底部仍以蓝色为主")
+    }
+}

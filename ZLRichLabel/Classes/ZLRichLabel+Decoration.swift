@@ -315,6 +315,9 @@ extension ZLRichLabel {
         var isRightToLeft: Bool
         /// 段内某个 run 的属性（按下高亮可能临时替换了装饰属性）
         var attributes: NSDictionary
+        /// `.baselineOffset`（向上为正）：CoreText 会把字形整体上移，但 run 的 ascent / descent 不包含它，
+        /// 背景和渐变区域需要跟着移动，否则文字在胶囊里偏上 / 偏下
+        var baselineOffset: CGFloat = 0
     }
 
     func decorationLines() -> [DecorationLine] {
@@ -369,6 +372,7 @@ extension ZLRichLabel {
             let cf = CTRunGetStringRange(run)
             let range = NSRange(location: cf.location + line.stringOffset, length: cf.length)
             let rtl = CTRunGetStatus(run).contains(.rightToLeft)
+            let baselineOffset = CGFloat((attrs[NSAttributedString.Key.baselineOffset.rawValue] as? NSNumber)?.doubleValue ?? 0)
             // 每个字符的字形右边界减去它的 kern：kern 加宽的是字形右侧
             var clusterMax: [CFIndex: CGFloat] = [:]
             for i in 0..<glyphCount {
@@ -387,7 +391,7 @@ extension ZLRichLabel {
             } else {
                 result.append(DecorationSegment(occurrence: occurrence, runs: [run], minX: minX, maxX: minX + width,
                                                 ascent: ascent, descent: descent, range: range, inkMaxX: inkMaxX,
-                                                isRightToLeft: rtl, attributes: attrs))
+                                                isRightToLeft: rtl, attributes: attrs, baselineOffset: baselineOffset))
             }
         }
         return result
@@ -414,7 +418,7 @@ extension ZLRichLabel {
                 let left = segment.minX - padding.left
                 let right = segment.inkMaxX + padding.right
                 var frame = CGRect(x: line.originX + left,
-                                   y: line.baselineY - segment.ascent - padding.top,
+                                   y: line.baselineY - segment.baselineOffset - segment.ascent - padding.top,
                                    width: right - left,
                                    height: segment.ascent + segment.descent + padding.top + padding.bottom)
                 // 位于折行开头 / 结尾时不超出 label
@@ -453,7 +457,7 @@ extension ZLRichLabel {
                                                   locations: locations) else { continue }
 
                 // 文字矩形（label 坐标系）
-                let rect = CGRect(x: line.originX + segment.minX, y: line.baselineY - segment.ascent,
+                let rect = CGRect(x: line.originX + segment.minX, y: line.baselineY - segment.baselineOffset - segment.ascent,
                                   width: segment.maxX - segment.minX, height: segment.ascent + segment.descent)
                 // 字形轮廓作为裁剪区域：CoreText 坐标（基线为原点、y 向上）→ label 坐标
                 let toLabel = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: line.originX, ty: line.baselineY)
