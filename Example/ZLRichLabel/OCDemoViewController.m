@@ -617,6 +617,7 @@ static NSString *OCQuote(NSString *s) {
     [self case27];
     // 胶囊背景 / 渐变文字
     [self case28];
+    [self case28b];
     [self.stackView addArrangedSubview:self.historyCard];
 
     [self refreshTapViews];
@@ -1418,6 +1419,32 @@ static NSString *OCQuote(NSString *s) {
 #pragma mark - 胶囊背景 / 渐变文字
 
 /// 28. 胶囊背景（圆角背景 / 边框 / 内边距）与渐变文字，由 label 自己绘制
+/// 28b. 从右到左（阿拉伯语 / 希伯来语）与双向混排下的胶囊：两侧内边距按视觉位置预留
+- (void)case28b {
+    NSString *name = @"28b. RTL / 双向混排的胶囊";
+    NSString *source = @"مرحبا #سويفت# لغة برمجة قوية\n"
+                        @"שלום #סוויפט# היא שפה\n"
+                        @"كبسولتان متجاورتان: #iOS##سويفت# معا\n"
+                        @"تعلم #SwiftUI# اليوم\n"
+                        @"Learn #سويفت# today";
+    __weak typeof(self) weakSelf = self;
+    [self addRuleCase:name source:source configure:^(ZLRichLabel *v) {
+        NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
+        paragraph.lineSpacing = 8;
+        NSMutableDictionary *style = [v.style mutableCopy];
+        style[NSParagraphStyleAttributeName] = paragraph;
+        v.style = style;
+        [v addRuleWithName:@"topic" pattern:@"#[^#\\s]+#" options:0 priority:0 error:nil handler:^(ZLRichRuleContext *ctx) {
+            [ctx addAttributes:@{NSForegroundColorAttributeName: kPurple,
+                                 ZLRichLabel.textBackgroundAttributeName: [ZLTextBackground capsule:kPurple]}];
+            ctx.highlightStyle = @{ZLRichLabel.textBackgroundAttributeName:
+                                       [ZLTextBackground backgroundWithFillColor:[kPurple colorWithAlphaComponent:0.3]
+                                                                     strokeColor:nil cornerRadius:-1]};
+            ctx.onTap = [weakSelf ruleTapForCase:name action:@"点击 RTL 胶囊"];
+        }];
+    }];
+}
+
 - (void)case28 {
     NSString *name = @"28. 胶囊背景 / 渐变文字";
     NSString *source = @"<grad>Swift 富文本</grad> <new>NEW</new>\n"

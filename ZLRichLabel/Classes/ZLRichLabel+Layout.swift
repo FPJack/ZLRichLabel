@@ -62,23 +62,6 @@ extension ZLRichLabel {
         }
     }
 
-    static func detectRightToLeft(_ string: String) -> Bool? {
-        for scalar in string.unicodeScalars {
-            let v = scalar.value
-            // Hebrew, Arabic, Syriac, Thaana, NKo, Samaritan, Mandaic, Arabic Ext, 表现形式
-            if (0x0590...0x08FF).contains(v) || (0xFB1D...0xFDFF).contains(v) || (0xFE70...0xFEFF).contains(v)
-                || (0x10800...0x10FFF).contains(v) || (0x1E800...0x1EFFF).contains(v) {
-                // 阿拉伯-印度数字（0660–0669、06F0–06F9）是弱方向字符，跳过
-                if (0x0660...0x0669).contains(v) || (0x06F0...0x06F9).contains(v) { continue }
-                return true
-            }
-            if CharacterSet.letters.contains(scalar) {
-                return false
-            }
-        }
-        return nil
-    }
-
     /// 与 ZLAttributedLabel 的绘制逻辑保持一致，计算自定义 View 的位置
     private func layoutAttachmentViews() {
         // 外部直接修改了 View 的尺寸（例如点击后展开）：先更新占位尺寸再布局
@@ -100,7 +83,6 @@ extension ZLRichLabel {
             || lineBreakMode == .byTruncatingMiddle
             || lineBreakMode == .byTruncatingTail
         let fontDescender = (font ?? UIFont.systemFont(ofSize: 17)).descender
-        let width = Double(textRect.width)
 
         for lineIndex in 0..<count {
             var line = lines[lineIndex]
@@ -109,13 +91,14 @@ extension ZLRichLabel {
             var descent: CGFloat = 0
             CTLineGetTypographicBounds(line, nil, &descent, nil)
 
+            let box = lineBox(for: lines[lineIndex], in: attr, width: textRect.width)
             if lineIndex == count - 1 && truncateLastLine,
-               let truncated = truncatedLine(for: line, in: attr, lineCount: count, width: width) {
+               let truncated = truncatedLine(for: line, in: attr, lineCount: count, width: Double(box.width)) {
                 line = truncated.line
                 lineString = truncated.string
             }
 
-            let penOffset = CGFloat(CTLineGetPenOffsetForFlush(line, flushFactor, width))
+            let penOffset = lineOffsetX(original: lines[lineIndex], drawn: line, in: attr, width: textRect.width)
             let baselineCT = origins[lineIndex].y - descent - fontDescender
             let baselineY = textRect.minY + textRect.height - baselineCT
             let string = lineString.string as NSString

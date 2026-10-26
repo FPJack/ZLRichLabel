@@ -109,6 +109,7 @@ final class HTagDemoPage: UIViewController {
         case27()
         // 胶囊背景 / 渐变文字
         case28()
+        case28b()
         // 内边距
         case29()
         stackView.addArrangedSubview(historyCard)
@@ -872,6 +873,27 @@ final class HTagDemoPage: UIViewController {
     // MARK: - 胶囊背景 / 渐变文字
 
     /// 28. 胶囊背景（圆角背景 / 边框 / 内边距）与渐变文字，由 label 自己绘制
+    /// 28b. 从右到左（阿拉伯语 / 希伯来语）与双向混排下的胶囊：两侧内边距按视觉位置预留
+    private func case28b() {
+        let name = "28b. RTL / 双向混排的胶囊"
+        let source = "مرحبا #سويفت# لغة برمجة قوية\n"
+            + "שלום #סוויפט# היא שפה\n"
+            + "كبسولتان متجاورتان: #iOS##سويفت# معا\n"
+            + "تعلم #SwiftUI# اليوم\n"
+            + "Learn #سويفت# today"
+
+        addRuleCase(name, source: source) { [weak self] v in
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineSpacing = 8
+            v.style = HTagDemoPage.baseStyle.merging([.paragraphStyle: paragraph]) { $1 }
+            try? v.addRule(name: "topic", pattern: "#[^#\\s]+#") { ctx in
+                ctx.addAttributes([.foregroundColor: UIColor.mPurple, .zlBackground: ZLTextBackground.capsule(.mPurple)])
+                ctx.highlightStyle = [.zlBackground: ZLTextBackground(fillColor: UIColor.mPurple.withAlphaComponent(0.3))]
+                ctx.onTap = { match in self?.onRuleTap(name, match, action: "点击 RTL 胶囊") }
+            }
+        }
+    }
+
     private func case28() {
         let name = "28. 胶囊背景 / 渐变文字"
         let source = "<grad>Swift 富文本</grad> <new>NEW</new>\n"

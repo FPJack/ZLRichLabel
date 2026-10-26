@@ -245,7 +245,7 @@ extension ZLRichLabel {
             var leading: CGFloat = 0
             let width = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
             let baselineY = textRect.minY + textRect.height - (origins[i].y - descent - fontDescender)
-            let penOffset = CGFloat(CTLineGetPenOffsetForFlush(line, flushFactor, Double(textRect.width)))
+            let penOffset = lineOffsetX(original: line, drawn: line, in: attr, width: textRect.width)
             let cfRange = CTLineGetStringRange(line)
             result.append(LineInfo(line: line, range: NSRange(location: cfRange.location, length: cfRange.length),
                                    top: baselineY - ascent, bottom: baselineY + descent,

@@ -14,7 +14,9 @@
 //
 //  实现：
 //  - 胶囊背景用 kern 在文字两侧预留内边距（只改属性，不插入字符，展示文字 / 原文 / 点击 / 选中的下标都不变），
-//    在绘制文字之前按每一行画出圆角背景和边框；跨行时每行一段
+//    在绘制文字之前按每一行画出圆角背景和边框；跨行时每行一段。
+//    kern 总是加宽字形右侧，所以按「视觉位置」加：右侧加在胶囊内视觉上最右的字符上，左侧加在胶囊左边紧挨着的字符上，
+//    从右到左（阿拉伯语 / 希伯来语）和双向混排时同样正确
 //  - 渐变文字：原文字颜色设为透明，文字绘制之后用字形作为裁剪区域填充渐变；跨行时每行一段
 //
 
@@ -126,6 +128,54 @@ final class ZLDecorationOccurrence: NSObject {
     }
 }
 
+/// 一个段落中字符的视觉顺序（从左到右）：整段排成一行后按字形位置得到（双向文本的重排在这里体现）。
+/// 用于按视觉位置给胶囊预留内边距：kern 总是加宽字形右侧
+struct ZLVisualOrder {
+    let isRightToLeft: Bool
+    /// 从左到右的字符下标（整个文本中的下标，同一字符的多个字形只记一次）
+    private(set) var order: [Int] = []
+    /// 字符 → 在 order 中的位置
+    private var position: [Int: Int] = [:]
+
+    init(text: NSAttributedString, paragraph: NSRange, isRightToLeft: Bool) {
+        self.isRightToLeft = isRightToLeft
+        guard paragraph.length > 0 else { return }
+        let line = CTLineCreateWithAttributedString(text.attributedSubstring(from: paragraph))
+        var glyphs: [(x: CGFloat, index: Int)] = []
+        for run in (CTLineGetGlyphRuns(line) as? [CTRun]) ?? [] {
+            let count = CTRunGetGlyphCount(run)
+            guard count > 0 else { continue }
+            var positions = [CGPoint](repeating: .zero, count: count)
+            var indices = [CFIndex](repeating: 0, count: count)
+            CTRunGetPositions(run, CFRange(location: 0, length: 0), &positions)
+            CTRunGetStringIndices(run, CFRange(location: 0, length: 0), &indices)
+            for i in 0..<count { glyphs.append((positions[i].x, indices[i] + paragraph.location)) }
+        }
+        // 稳定排序：位置相同的字形（组合符号等）保持原有顺序
+        for glyph in glyphs.enumerated().sorted(by: { ($0.element.x, $0.offset) < ($1.element.x, $1.offset) }).map({ $0.element })
+        where position[glyph.index] == nil {
+            position[glyph.index] = order.count
+            order.append(glyph.index)
+        }
+    }
+
+    /// 一段文字的视觉边缘：视觉上最右的字符，以及左边紧挨着的字符（没有时为 nil）
+    func edges(of range: NSRange) -> (right: Int, leftNeighbor: Int?)? {
+        var minPosition = Int.max
+        var maxPosition = Int.min
+        for index in range.location..<NSMaxRange(range) {
+            guard let p = position[index] else { continue }
+            minPosition = min(minPosition, p)
+            maxPosition = max(maxPosition, p)
+        }
+        guard maxPosition >= 0, minPosition != Int.max else { return nil }
+        let neighbor = minPosition > 0 ? order[minPosition - 1] : nil
+        // 左边的字符在胶囊内（胶囊被其它方向的文字隔开，极少见）：视为没有
+        if let n = neighbor, NSLocationInRange(n, range) { return (order[maxPosition], nil) }
+        return (order[maxPosition], neighbor)
+    }
+}
+
 extension ZLRichLabel {
 
     /// Objective-C 使用：胶囊背景属性名（等同于 Swift 的 `.zlBackground`），值为 `ZLTextBackground`
@@ -172,27 +222,46 @@ extension ZLRichLabel {
         }
 
         let string = text.string as NSString
+        // 每个段落的视觉顺序（加 kern 之前计算；kern 不改变顺序）
+        var orders: [Int: ZLVisualOrder] = [:]
+        func visualOrder(at location: Int) -> ZLVisualOrder {
+            let paragraph = string.paragraphRange(for: NSRange(location: location, length: 0))
+            if let order = orders[paragraph.location] { return order }
+            let style = text.attribute(.paragraphStyle, at: paragraph.location, effectiveRange: nil) as? NSParagraphStyle
+            let order = ZLVisualOrder(text: text, paragraph: paragraph,
+                                      isRightToLeft: isRightToLeftParagraph(style, in: text, at: paragraph.location))
+            orders[paragraph.location] = order
+            return order
+        }
+        func isNewline(_ index: Int) -> Bool {
+            guard let scalar = UnicodeScalar(string.character(at: index)) else { return false }
+            return CharacterSet.newlines.contains(scalar)
+        }
+
         for (range, background) in backgrounds {
             hasTextBackgrounds = true
             text.addAttribute(ZLRichLabel.backgroundOccurrenceKey,
                               value: ZLDecorationOccurrence(range: range, background: background, gradient: nil),
                               range: range)
-            // 后侧：加在最后一个字符上
-            let last = NSMaxRange(range) - 1
-            addKern(background.padding.right + background.margin, at: last, in: text)
-            // 前侧：加在前一个字符上；位于段落开头时用首行缩进
-            let previous = range.location - 1
+            let order = visualOrder(at: range.location)
+            let edges = order.edges(of: range)
+            // 右侧：加在胶囊内视觉上最右的字符上（kern 加宽字形右侧）
+            if let right = edges?.right ?? Optional(NSMaxRange(range) - 1) {
+                addKern(background.padding.right + background.margin, at: right, in: text)
+            }
+            // 左侧：加在胶囊左边紧挨着的字符上
             let leading = background.padding.left + background.margin
-            if previous >= 0, let scalar = UnicodeScalar(string.character(at: previous)),
-               !CharacterSet.newlines.contains(scalar) {
-                addKern(leading, at: previous, in: text)
-            } else {
+            if let neighbor = edges?.leftNeighbor, !isNewline(neighbor) {
+                addKern(leading, at: neighbor, in: text)
+            } else if !order.isRightToLeft {
+                // 从左到右的段落中位于最左（段落开头）：用首行缩进
                 let paragraphRange = string.paragraphRange(for: NSRange(location: range.location, length: 0))
                 let current = text.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle
                 let style = (current?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
                 style.firstLineHeadIndent += leading
                 text.addAttribute(.paragraphStyle, value: style, range: paragraphRange)
             }
+            // 从右到左的段落中位于最左（段落末尾）：左边是行尾的空白，背景直接画在空白里，不需要预留
         }
         for (range, gradient) in gradients {
             hasTextGradients = true
@@ -241,6 +310,8 @@ extension ZLRichLabel {
         var ascent: CGFloat
         var descent: CGFloat
         var range: NSRange
+        /// 文字视觉上的右边界（不含最右字符上的 kern，即预留的内边距 / 间距）
+        var inkMaxX: CGFloat
         var isRightToLeft: Bool
         /// 段内某个 run 的属性（按下高亮可能临时替换了装饰属性）
         var attributes: NSDictionary
@@ -255,7 +326,6 @@ extension ZLRichLabel {
         let truncates = lineBreakMode == .byTruncatingHead || lineBreakMode == .byTruncatingMiddle
             || lineBreakMode == .byTruncatingTail
         let fontDescender = (font ?? UIFont.systemFont(ofSize: 17)).descender
-        let width = Double(textRect.width)
 
         var result: [DecorationLine] = []
         for i in 0..<count {
@@ -264,11 +334,13 @@ extension ZLRichLabel {
             CTLineGetTypographicBounds(line, nil, &descent, nil)
             let baselineY = textRect.minY + textRect.height - (origins[i].y - descent - fontDescender)
             var offset = 0
-            if i == count - 1, truncates, let truncated = truncatedLine(for: line, in: attr, lineCount: count, width: width) {
+            let box = lineBox(for: lines[i], in: attr, width: textRect.width)
+            if i == count - 1, truncates,
+               let truncated = truncatedLine(for: line, in: attr, lineCount: count, width: Double(box.width)) {
                 line = truncated.line
                 offset = CTLineGetStringRange(lines[i]).location
             }
-            let penOffset = CGFloat(CTLineGetPenOffsetForFlush(line, flushFactor, width))
+            let penOffset = lineOffsetX(original: lines[i], drawn: line, in: attr, width: textRect.width)
             result.append(DecorationLine(line: line, stringOffset: offset,
                                          originX: textInsets.left + penOffset, baselineY: baselineY))
         }
@@ -286,6 +358,10 @@ extension ZLRichLabel {
             guard glyphCount > 0 else { continue }
             var positions = [CGPoint](repeating: .zero, count: glyphCount)
             CTRunGetPositions(run, CFRange(location: 0, length: 0), &positions)
+            var advances = [CGSize](repeating: .zero, count: glyphCount)
+            CTRunGetAdvances(run, CFRange(location: 0, length: 0), &advances)
+            var indices = [CFIndex](repeating: 0, count: glyphCount)
+            CTRunGetStringIndices(run, CFRange(location: 0, length: 0), &indices)
             var ascent: CGFloat = 0
             var descent: CGFloat = 0
             let width = CGFloat(CTRunGetTypographicBounds(run, CFRange(location: 0, length: 0), &ascent, &descent, nil))
@@ -293,21 +369,36 @@ extension ZLRichLabel {
             let cf = CTRunGetStringRange(run)
             let range = NSRange(location: cf.location + line.stringOffset, length: cf.length)
             let rtl = CTRunGetStatus(run).contains(.rightToLeft)
+            // 每个字符的字形右边界减去它的 kern：kern 加宽的是字形右侧
+            var clusterMax: [CFIndex: CGFloat] = [:]
+            for i in 0..<glyphCount {
+                clusterMax[indices[i]] = max(clusterMax[indices[i]] ?? -.greatestFiniteMagnitude, positions[i].x + advances[i].width)
+            }
+            let inkMaxX = clusterMax.map { index, maxX in maxX - kern(atLineIndex: index, in: line) }.max() ?? (minX + width)
 
             if let index = result.firstIndex(where: { $0.occurrence === occurrence }) {
                 result[index].runs.append(run)
                 result[index].minX = min(result[index].minX, minX)
                 result[index].maxX = max(result[index].maxX, minX + width)
+                result[index].inkMaxX = max(result[index].inkMaxX, inkMaxX)
                 result[index].ascent = max(result[index].ascent, ascent)
                 result[index].descent = max(result[index].descent, descent)
                 result[index].range = NSUnionRange(result[index].range, range)
             } else {
                 result.append(DecorationSegment(occurrence: occurrence, runs: [run], minX: minX, maxX: minX + width,
-                                                ascent: ascent, descent: descent, range: range,
+                                                ascent: ascent, descent: descent, range: range, inkMaxX: inkMaxX,
                                                 isRightToLeft: rtl, attributes: attrs))
             }
         }
         return result
+    }
+
+    /// 行内某个字符（下标相对这一行的字符串）上的 kern；截断行末尾的截断符不在正文中，返回 0
+    private func kern(atLineIndex index: CFIndex, in line: DecorationLine) -> CGFloat {
+        let location = index + line.stringOffset
+        guard let text = attributedText, location >= 0, location < text.length else { return 0 }
+        // 只会查询带装饰的字符（截断符不带装饰），截断行的字符串是原文从行首开始的子串，加上偏移即为原文下标
+        return CGFloat((text.attribute(.kern, at: location, effectiveRange: nil) as? NSNumber)?.doubleValue ?? 0)
     }
 
     private func drawBackgrounds(_ lines: [DecorationLine], in context: CGContext) {
@@ -317,27 +408,11 @@ extension ZLRichLabel {
                 let style = (segment.attributes[NSAttributedString.Key.zlBackground.rawValue] as? ZLTextBackground)
                     ?? segment.occurrence.background
                 guard let background = style else { continue }
-                let occurrence = segment.occurrence.range
-                let containsLast = NSLocationInRange(NSMaxRange(occurrence) - 1, segment.range)
                 let padding = background.padding
-
-                // 最后一个字符的 kern 包含在 run 宽度里，它可能不只是自己的 padding.right + margin：
-                // 紧挨着的下一个胶囊的 padding.left + margin、原文自带的 kern 也加在这个字符上。
-                // 所以按实际 kern 算出文字结束的位置，再加上自己的 padding.right
-                var left = segment.minX - padding.left
-                var right = segment.maxX + padding.right
-                if containsLast {
-                    let last = NSMaxRange(occurrence) - 1
-                    let text = attributedText
-                    let kern = (last >= 0 && last < (text?.length ?? 0)
-                        ? text?.attribute(.kern, at: last, effectiveRange: nil) as? NSNumber : nil)
-                        .map { CGFloat($0.doubleValue) } ?? 0
-                    if segment.isRightToLeft {
-                        left = segment.minX + kern - padding.right
-                    } else {
-                        right = segment.maxX - kern + padding.right
-                    }
-                }
+                // 视觉最右字符上的 kern 可能不只是自己的 padding.right + margin（紧挨着的下一个胶囊的
+                // padding.left + margin、原文自带的 kern 也在上面），所以用去掉 kern 的文字右边界再加上 padding.right
+                let left = segment.minX - padding.left
+                let right = segment.inkMaxX + padding.right
                 var frame = CGRect(x: line.originX + left,
                                    y: line.baselineY - segment.ascent - padding.top,
                                    width: right - left,

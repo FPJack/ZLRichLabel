@@ -1955,3 +1955,239 @@ class ExpandTokenTapTests: XCTestCase {
         XCTAssertEqual(changes, [true, false])
     }
 }
+
+/// 从右到左（RTL）/ 双向混排下的胶囊内边距，以及段落缩进
+class RTLDecorationTests: XCTestCase {
+
+    private var window: UIWindow!
+
+    override func setUp() {
+        super.setUp()
+        window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        window.isHidden = false
+    }
+
+    override func tearDown() {
+        window.isHidden = true
+        window = nil
+        super.tearDown()
+    }
+
+    /// 一个胶囊的测量结果（单位 pt）
+    struct Capsule {
+        let minX: CGFloat, maxX: CGFloat
+        /// 胶囊内文字到背景左 / 右边缘的距离
+        let innerLeft: CGFloat, innerRight: CGFloat
+        /// 背景到相邻黑色文字的距离，没有相邻文字时为 nil
+        let outerLeft: CGFloat?, outerRight: CGFloat?
+    }
+
+    private let padding: CGFloat = 6
+    private let margin: CGFloat = 3
+
+    /// 渲染：胶囊纯红填充、胶囊内文字蓝色、其它文字黑色；返回每条红色带中的胶囊（从左到右）
+    private func capsules(_ text: String, pattern: String, width: CGFloat = 320) -> [[Capsule]] {
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: width, height: 0))
+        label.numberOfLines = 0
+        label.backgroundColor = .white
+        label.update { v in
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineSpacing = 10
+            v.style = [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.black, .paragraphStyle: paragraph]
+            try? v.addRule(name: "capsule", pattern: pattern) { [padding, margin] ctx in
+                ctx.addAttributes([.foregroundColor: UIColor.blue,
+                                   .zlBackground: ZLTextBackground(fillColor: .red, cornerRadius: 0,
+                                                                   padding: UIEdgeInsets(top: 1, left: padding, bottom: 1, right: padding),
+                                                                   margin: margin)])
+            }
+            v.text = text
+        }
+        window.addSubview(label)
+        label.frame.size.height = label.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height + 8
+        label.layoutIfNeeded()
+
+        let scale: CGFloat = 2
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        format.preferredRange = .standard
+        let image = UIGraphicsImageRenderer(bounds: label.bounds, format: format).image { label.layer.render(in: $0.cgContext) }
+        guard let cg = image.cgImage, let ptr = CFDataGetBytePtr(cg.dataProvider!.data) else { return [] }
+        let little = cg.bitmapInfo.contains(.byteOrder32Little)
+        func rgb(_ x: Int, _ y: Int) -> (Int, Int, Int) {
+            let i = y * cg.bytesPerRow + x * 4
+            let (a, b, c) = (Int(ptr[i]), Int(ptr[i + 1]), Int(ptr[i + 2]))
+            return little ? (c, b, a) : (a, b, c)
+        }
+        func isRed(_ x: Int, _ y: Int) -> Bool { let p = rgb(x, y); return p.0 > 200 && p.1 < 60 && p.2 < 60 }
+        func isBlue(_ x: Int, _ y: Int) -> Bool { let p = rgb(x, y); return p.2 > 110 && p.2 > p.0 + 30 && p.1 < 140 }
+        func isBlack(_ x: Int, _ y: Int) -> Bool {
+            let p = rgb(x, y); return p.0 < 140 && p.1 < 140 && p.2 < 140 && !isBlue(x, y) && !(p.0 > p.1 + 60)
+        }
+        func rowHasRed(_ y: Int) -> Bool { (0..<cg.width).contains { isRed($0, y) } }
+
+        var bands: [[Capsule]] = []
+        var y = 0
+        while y < cg.height {
+            guard rowHasRed(y) else { y += 1; continue }
+            let top = y
+            while y < cg.height, rowHasRed(y) { y += 1 }
+            let bottom = y - 1
+            let mid = (top...bottom).max { a, b in
+                (0..<cg.width).filter { isRed($0, a) }.count < (0..<cg.width).filter { isRed($0, b) }.count
+            }!
+            var result: [Capsule] = []
+            var x = 0
+            while x < cg.width {
+                guard isRed(x, mid) else { x += 1; continue }
+                let start = x
+                var lastRed = x
+                while x < cg.width, isRed(x, mid) || isBlue(x, mid) || (rgb(x, mid).0 > 120 && rgb(x, mid).1 < 120) {
+                    if isRed(x, mid) { lastRed = x }
+                    x += 1
+                }
+                var blueMin = Int.max, blueMax = Int.min
+                var blackLeft = Int.min, blackRight = Int.max
+                for yy in top...bottom {
+                    for xx in start...lastRed where isBlue(xx, yy) { blueMin = min(blueMin, xx); blueMax = max(blueMax, xx) }
+                    for xx in stride(from: start - 1, through: max(0, start - 60), by: -1) where isBlack(xx, yy) {
+                        blackLeft = max(blackLeft, xx); break
+                    }
+                    for xx in (lastRed + 1)..<min(cg.width, lastRed + 60) where isBlack(xx, yy) {
+                        blackRight = min(blackRight, xx); break
+                    }
+                }
+                guard blueMin != Int.max else { continue }
+                result.append(Capsule(minX: CGFloat(start) / scale, maxX: CGFloat(lastRed + 1) / scale,
+                                      innerLeft: CGFloat(blueMin - start) / scale,
+                                      innerRight: CGFloat(lastRed - blueMax) / scale,
+                                      outerLeft: blackLeft == Int.min ? nil : CGFloat(start - blackLeft - 1) / scale,
+                                      outerRight: blackRight == Int.max ? nil : CGFloat(blackRight - lastRed - 1) / scale))
+            }
+            bands.append(result)
+        }
+        return bands
+    }
+
+    /// 两侧内边距都接近设置值（字形本身的左右留白有 1 ~ 2pt 误差）
+    private func assertPadding(_ capsule: Capsule?, _ message: String, file: StaticString = #filePath, line: UInt = #line) {
+        guard let c = capsule else { return XCTFail("没有画出胶囊：\(message)", file: file, line: line) }
+        XCTAssertGreaterThanOrEqual(c.innerLeft, padding - 1.5, "左侧内边距：\(message) \(c)", file: file, line: line)
+        XCTAssertLessThanOrEqual(c.innerLeft, padding + 2.5, "左侧内边距：\(message) \(c)", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(c.innerRight, padding - 1.5, "右侧内边距：\(message) \(c)", file: file, line: line)
+        XCTAssertLessThanOrEqual(c.innerRight, padding + 2.5, "右侧内边距：\(message) \(c)", file: file, line: line)
+    }
+
+    /// 外侧与相邻文字的距离：有相邻文字的一侧不能贴住（>= margin），两侧大致对称
+    private func assertOuterGaps(_ capsule: Capsule?, _ message: String, file: StaticString = #filePath, line: UInt = #line) {
+        guard let c = capsule else { return XCTFail("没有画出胶囊：\(message)", file: file, line: line) }
+        for gap in [c.outerLeft, c.outerRight].compactMap({ $0 }) {
+            XCTAssertGreaterThanOrEqual(gap, margin, "外侧贴住了相邻文字：\(message) \(c)", file: file, line: line)
+            XCTAssertLessThanOrEqual(gap, margin + 8, "外侧空隙过大（间距挤到了一侧）：\(message) \(c)", file: file, line: line)
+        }
+    }
+
+    func testLeftToRightBaseline() {
+        let mid = capsules("Hello world #Swift# and more words here.", pattern: "#[^#]+#").first?.first
+        assertPadding(mid, "LTR 句中")
+        assertOuterGaps(mid, "LTR 句中")
+        let start = capsules("#Swift# starts the paragraph", pattern: "#[^#]+#").first?.first
+        assertPadding(start, "LTR 段落开头")
+        XCTAssertGreaterThanOrEqual(start?.minX ?? -1, 0, "段落开头的胶囊不被裁掉")
+    }
+
+    func testRightToLeftPadding() {
+        let arabic = "مرحبا بالعالم سويفت لغة برمجة قوية"
+        for (name, text) in [("阿拉伯语句中", arabic),
+                             ("阿拉伯语句首", "سويفت لغة برمجة قوية"),
+                             ("阿拉伯语句尾", "لغة برمجة قوية سويفت")] {
+            let capsule = capsules(text, pattern: "سويفت").first?.first
+            assertPadding(capsule, name)
+            assertOuterGaps(capsule, name)
+        }
+        let hebrew = capsules("שלום עולם סוויפט היא שפה", pattern: "סוויפט").first?.first
+        assertPadding(hebrew, "希伯来语")
+        assertOuterGaps(hebrew, "希伯来语")
+        let hashtag = capsules("مرحبا #سويفت# برمجة", pattern: "#[^#]+#").first?.first
+        assertPadding(hashtag, "阿拉伯语 #话题#")
+        let start = capsules("سويفت لغة برمجة قوية", pattern: "سويفت").first?.first
+        XCTAssertLessThanOrEqual(start?.maxX ?? .greatestFiniteMagnitude, 320, "RTL 段落开头（最右）的胶囊不被裁掉")
+    }
+
+    func testAdjacentRightToLeftCapsulesDoNotOverlap() {
+        guard let band = capsules("مرحبا سويفتلغة برمجة", pattern: "سويفت|لغة").first else { return XCTFail() }
+        XCTAssertEqual(band.count, 2, "紧挨着的两个胶囊分开画")
+        guard band.count == 2 else { return }
+        band.forEach { assertPadding($0, "紧挨着的 RTL 胶囊") }
+        XCTAssertGreaterThanOrEqual(band[1].minX - band[0].maxX, margin, "两个胶囊之间留有间距，不重叠")
+    }
+
+    func testBidirectionalMixedCapsules() {
+        let ltrInRtl = capsules("مرحبا بالعالم Swift لغة برمجة", pattern: "Swift").first?.first
+        assertPadding(ltrInRtl, "阿拉伯段落中的英文胶囊")
+        assertOuterGaps(ltrInRtl, "阿拉伯段落中的英文胶囊")
+        let rtlInLtr = capsules("Hello world سويفت is great", pattern: "سويفت").first?.first
+        assertPadding(rtlInLtr, "英文段落中的阿拉伯胶囊")
+        assertOuterGaps(rtlInLtr, "英文段落中的阿拉伯胶囊")
+        let digits = capsules("السعر 123 دولار فقط", pattern: "123").first?.first
+        assertPadding(digits, "阿拉伯段落中的数字")
+        assertOuterGaps(digits, "阿拉伯段落中的数字")
+    }
+
+    func testWrappedRightToLeftCapsuleDrawsOnEachLine() {
+        let bands = capsules("مرحبا بالعالم هذا نص طويل جدا يحتوي على كبسولة طويلة سويفت لغة برمجة قوية وسهلة ثم يكمل النص",
+                             pattern: "سويفت لغة برمجة قوية وسهلة", width: 200)
+        XCTAssertEqual(bands.count, 2, "跨行时每行一段")
+        // 胶囊起点（逻辑开头）在第一段的右侧：右内边距正常
+        XCTAssertGreaterThanOrEqual(bands.first?.first?.innerRight ?? 0, padding - 1.5)
+        // 胶囊结尾在第二段的左侧：左内边距正常
+        XCTAssertGreaterThanOrEqual(bands.last?.first?.innerLeft ?? 0, padding - 1.5)
+    }
+
+    // MARK: 段落缩进
+
+    private func indentLabel(_ text: String, style: NSParagraphStyle) -> ZLAttributedLabel {
+        let label = ZLAttributedLabel(frame: CGRect(x: 0, y: 0, width: 240, height: 200))
+        label.numberOfLines = 0
+        label.verticalAlignment = .top
+        label.attributedText = NSAttributedString(string: text, attributes: [.font: UIFont.systemFont(ofSize: 17),
+                                                                             .paragraphStyle: style])
+        label.layoutIfNeeded()
+        return label
+    }
+
+    func testParagraphIndentsAreApplied() {
+        let style = NSMutableParagraphStyle()
+        style.firstLineHeadIndent = 30
+        style.headIndent = 10
+        let text = "Hello world this is a long paragraph that wraps onto more lines here."
+        let label = indentLabel(text, style: style)
+        let first = label.boundingRect(forCharacterRange: NSRange(location: 0, length: 1))
+        XCTAssertEqual(first.minX, 30, accuracy: 1.5, "首行缩进")
+        let firstLineEnd = (text as NSString).range(of: "long").location
+        let secondLine = label.lineRects(forTesting: NSRange(location: firstLineEnd, length: text.count - firstLineEnd))
+        XCTAssertNotNil(secondLine)
+        // 字符定位与绘制一致：首行缩进区域内不是文字
+        XCTAssertEqual(label.characterIndex(at: CGPoint(x: 15, y: first.midY)), NSNotFound)
+        XCTAssertEqual(label.characterIndex(at: CGPoint(x: first.midX, y: first.midY)), 0)
+    }
+
+    func testRightToLeftParagraphIndentIsOnTheRight() {
+        let style = NSMutableParagraphStyle()
+        style.firstLineHeadIndent = 30
+        style.baseWritingDirection = .rightToLeft
+        style.alignment = .right
+        let label = indentLabel("مرحبا بالعالم", style: style)
+        label.textAlignment = .right
+        label.layoutIfNeeded()
+        let rect = label.boundingRect(forCharacterRange: NSRange(location: 0, length: 13))
+        XCTAssertEqual(rect.maxX, 240 - 30, accuracy: 1.5, "RTL 段落的首行缩进在右侧")
+    }
+}
+
+private extension ZLAttributedLabel {
+    /// 测试用：一段文字是否可见
+    func lineRects(forTesting range: NSRange) -> CGRect? {
+        let rect = boundingRect(forCharacterRange: range)
+        return rect == .zero ? nil : rect
+    }
+}

@@ -573,6 +573,7 @@ label.delegate = self;   // attributedLabel:didSelectLinkWithURL: / attributedLa
 - Auto Layout：设置宽度约束即可，高度由 `intrinsicContentSize` 计算
 - Frame 布局：`label.sizeThatFits(CGSize(width: w, height: .greatestFiniteMagnitude))`
 - RTL：`textAlignment` 为 `.natural`（默认）时，按内容的第一个强方向字符自动左 / 右对齐
+- 段落缩进：段落样式的 `firstLineHeadIndent` / `headIndent` / `tailIndent` 对绘制、点击、字符定位、内嵌 View 都生效；从右到左的段落中头部缩进在右侧
 
 内边距：背景色铺满整个 label，文字在内边距以内排版，适合「气泡 / 卡片」样式，不需要再套一层容器 View：
 
@@ -630,12 +631,11 @@ label.tagStyles = ["grad": [.font: UIFont.boldSystemFont(ofSize: 22),
 
 说明：
 
-- **水平内边距占用排版空间**：组件用 kern 在胶囊两侧预留 `padding + margin`（位于段落开头时用首行缩进），不插入任何字符，所以展示文字、原文、点击范围、选中都不受影响。
+- **水平内边距占用排版空间**：组件用 kern 在胶囊两侧预留 `padding + margin`，不插入任何字符，所以展示文字、原文、点击范围、选中都不受影响。kern 按视觉位置加（右侧加在胶囊内视觉上最右的字符上，左侧加在左边紧挨着的字符上；从左到右的段落开头用首行缩进），所以阿拉伯语 / 希伯来语等从右到左文本、以及中英与阿拉伯语双向混排时，两侧内边距同样准确。
 - **垂直内边距不占行高**，只影响绘制；多行文本请适当设置 `lineSpacing`，避免背景和上下行重叠。
 - **跨行**：胶囊和渐变都按行分段绘制；位于折行开头 / 结尾的一段不会超出 label。
 - 相邻的两个命中即使用的是同一个 `ZLTextBackground` 实例，也是两个独立的胶囊。
 - 渐变文字的原颜色会被设为透明，下划线 / 删除线因此也不显示。
-- 从右到左（RTL）文本中，胶囊左右内边距的位置可能不够精确。
 
 ## 长按 / 双击 / 点击热区
 
@@ -988,6 +988,7 @@ Example 工程通过 Swift Package Manager 引用仓库根目录的本地包（`
 | 26 | 选中复制：长按选词、拖柄调整，「复制」展示文字 /「复制原文」，下方实时显示 selectedText / selectedRawText |
 | 27 | 通用标签：`<b>` `<i>` `<u>` `<color value>` `<size value>` `<a href>`、自闭合 `<br/>` `<icon/>`、嵌套（内层继承外层样式、点击内层优先）、容错；卡片下方按嵌套缩进显示属性 |
 | 28 | 胶囊背景 / 渐变文字：#话题# 胶囊（按下变深）、行内代码、实心徽章、只有边框的标签、横向 / 竖向渐变、跨行的胶囊 |
+| 28b | RTL / 双向混排的胶囊：阿拉伯语、希伯来语 #话题#，紧挨着的两个 RTL 胶囊，阿拉伯语中的英文胶囊、英文中的阿拉伯胶囊（两侧内边距一致，可点击） |
 | 29 | 内边距 `textInsets`：圆角背景的 label 切换 0 / 8 / 12·16 / 24 内边距，文字重新折行；链接、内嵌标签、展开 / 收起都在内边距以内 |
 
 页面顶部会显示最近一次点击得到的完整信息，底部有点击历史。

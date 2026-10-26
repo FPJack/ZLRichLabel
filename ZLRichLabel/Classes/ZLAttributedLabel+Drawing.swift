@@ -86,17 +86,17 @@ extension ZLAttributedLabel {
         }
         let count = numberOfLines > 0 ? min(numberOfLines, lines.count) : lines.count
         let fontDescender = baselineFont.descender
-        let width = Double(textRect.width)
         var result: [DrawingLine] = []
         for i in 0..<count {
             var line = lines[i]
             var descent: CGFloat = 0
             CTLineGetTypographicBounds(line, nil, &descent, nil)
+            let box = lineBox(for: lines[i], in: text, width: textRect.width)
             if i == count - 1, truncatesLastLine,
-               let truncated = truncatedLine(for: line, in: text, lineCount: count, width: width) {
+               let truncated = truncatedLine(for: line, in: text, lineCount: count, width: Double(box.width)) {
                 line = truncated.line
             }
-            let penOffset = CGFloat(CTLineGetPenOffsetForFlush(line, flushFactor, width))
+            let penOffset = lineOffsetX(original: lines[i], drawn: line, in: text, width: textRect.width)
             result.append(DrawingLine(line: line, position: CGPoint(x: penOffset, y: origins[i].y - descent - fontDescender)))
         }
         return result

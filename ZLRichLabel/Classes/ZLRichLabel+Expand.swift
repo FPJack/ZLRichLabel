@@ -70,14 +70,15 @@ extension ZLRichLabel {
         let lastLine = lines[count - 1]
         let lastRange = CTLineGetStringRange(lastLine)
         isTruncated = lastRange.location + lastRange.length < attr.length
+        let box = lineBox(for: lastLine, in: attr, width: textRect.width)
         guard isTruncated, !isExpanded, expandToken != nil,
-              let truncated = truncatedLine(for: lastLine, in: attr, lineCount: count, width: Double(textRect.width))
+              let truncated = truncatedLine(for: lastLine, in: attr, lineCount: count, width: Double(box.width))
         else { return }
 
         var descent: CGFloat = 0
         CTLineGetTypographicBounds(lastLine, nil, &descent, nil)
         let fontDescender = (font ?? UIFont.systemFont(ofSize: 17)).descender
-        let penOffset = CGFloat(CTLineGetPenOffsetForFlush(truncated.line, flushFactor, Double(textRect.width)))
+        let penOffset = lineOffsetX(original: lastLine, drawn: truncated.line, in: attr, width: textRect.width)
         let baselineY = textRect.minY + textRect.height - (origins[count - 1].y - descent - fontDescender)
 
         var rect = CGRect.null

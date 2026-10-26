@@ -131,6 +131,64 @@ extension ZLAttributedLabel {
         return count
     }
 
+    /// 文字的书写方向：取第一个强方向字符（与 CoreText 的自然段落方向一致），没有强方向字符时为 nil
+    static func detectRightToLeft(_ string: String) -> Bool? {
+        for scalar in string.unicodeScalars {
+            let v = scalar.value
+            // Hebrew, Arabic, Syriac, Thaana, NKo, Samaritan, Mandaic, Arabic Ext, 表现形式
+            if (0x0590...0x08FF).contains(v) || (0xFB1D...0xFDFF).contains(v) || (0xFE70...0xFEFF).contains(v)
+                || (0x10800...0x10FFF).contains(v) || (0x1E800...0x1EFFF).contains(v) {
+                // 阿拉伯-印度数字（0660–0669、06F0–06F9）是弱方向字符，跳过
+                if (0x0660...0x0669).contains(v) || (0x06F0...0x06F9).contains(v) { continue }
+                return true
+            }
+            if CharacterSet.letters.contains(scalar) {
+                return false
+            }
+        }
+        return nil
+    }
+
+    /// 某个段落的书写方向是否为从右到左：段落样式指定时按样式，否则按内容（没有强方向字符时跟随界面方向）
+    func isRightToLeftParagraph(_ style: NSParagraphStyle?, in text: NSAttributedString, at location: Int) -> Bool {
+        switch style?.baseWritingDirection ?? .natural {
+        case .rightToLeft: return true
+        case .leftToRight: return false
+        default:
+            let string = text.string as NSString
+            let paragraph = string.paragraphRange(for: NSRange(location: min(location, string.length), length: 0))
+            return ZLAttributedLabel.detectRightToLeft(string.substring(with: paragraph))
+                ?? (effectiveUserInterfaceLayoutDirection == .rightToLeft)
+        }
+    }
+
+    /// 一行在 textRect 中可用的水平区域（相对 textRect 左边）：扣除段落样式的缩进
+    /// （`firstLineHeadIndent` / `headIndent` / `tailIndent`，从右到左的段落中头部缩进在右侧）。
+    /// `line` 须为 frameLines 返回的原始行（截断后的行字符下标从 0 开始，不能用来查段落）
+    func lineBox(for line: CTLine, in text: NSAttributedString, width: CGFloat) -> (x: CGFloat, width: CGFloat) {
+        let location = CTLineGetStringRange(line).location
+        guard location >= 0, location < text.length,
+              let style = text.attribute(.paragraphStyle, at: location, effectiveRange: nil) as? NSParagraphStyle
+        else { return (0, width) }
+        let string = text.string as NSString
+        let isFirstLine = string.paragraphRange(for: NSRange(location: location, length: 0)).location == location
+        let head = isFirstLine ? style.firstLineHeadIndent : style.headIndent
+        // tailIndent > 0：到头部边缘的距离（即行宽）；<= 0：到尾部边缘的距离
+        let tail = style.tailIndent > 0 ? max(0, width - style.tailIndent) : -style.tailIndent
+        guard head != 0 || tail != 0 else { return (0, width) }
+        let rtl = isRightToLeftParagraph(style, in: text, at: location)
+        let left = rtl ? tail : head
+        let right = rtl ? head : tail
+        return (left, max(0, width - left - right))
+    }
+
+    /// 某一行绘制时的水平起点（相对 textRect 左边）：段落缩进 + 对齐偏移。
+    /// `original` 为 frameLines 返回的原始行，`drawn` 为实际绘制的行（截断时为截断后的行）
+    func lineOffsetX(original: CTLine, drawn: CTLine, in text: NSAttributedString, width: CGFloat) -> CGFloat {
+        let box = lineBox(for: original, in: text, width: width)
+        return box.x + CGFloat(CTLineGetPenOffsetForFlush(drawn, flushFactor, Double(box.width)))
+    }
+
     /// 水平对齐对应的 flush factor（`.natural` 按界面方向）
     var flushFactor: CGFloat {
         switch textAlignment {
@@ -236,7 +294,6 @@ extension ZLAttributedLabel {
         guard !lines.isEmpty else { return NSNotFound }
         let count = lineLimit > 0 ? min(lineLimit, lines.count) : lines.count
         let fontDescender = baselineFont.descender
-        let width = Double(textRect.width)
 
         for lineIndex in 0..<count {
             let line = lines[lineIndex]
@@ -247,7 +304,7 @@ extension ZLAttributedLabel {
             let baselineY = textRect.minY + textRect.height - (origins[lineIndex].y - descent - fontDescender)
             if point.y < baselineY - ascent { return NSNotFound }     // 在这一行上方（行间距）
             if point.y > baselineY + descent + leading { continue }  // 在这一行下方
-            let penOffset = CGFloat(CTLineGetPenOffsetForFlush(line, flushFactor, width))
+            let penOffset = lineOffsetX(original: line, drawn: line, in: text, width: textRect.width)
             let x = point.x - textInsets.left - penOffset
             guard x >= 0, x <= lineWidth else { return NSNotFound }
             var index = CTLineGetStringIndexForPosition(line, CGPoint(x: x, y: 0))
@@ -284,7 +341,7 @@ extension ZLAttributedLabel {
             var descent: CGFloat = 0
             let lineWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, nil))
             let baselineY = textRect.minY + textRect.height - (origins[i].y - descent - fontDescender)
-            let penOffset = CGFloat(CTLineGetPenOffsetForFlush(line, flushFactor, Double(textRect.width)))
+            let penOffset = lineOffsetX(original: line, drawn: line, in: text, width: textRect.width)
             // 行尾空白可能超出排版宽度（伸进右内边距），不计入矩形
             let visibleWidth = lineWidth - CGFloat(CTLineGetTrailingWhitespaceWidth(line))
             let x1 = min(CTLineGetOffsetForStringIndex(line, overlap.location, nil), visibleWidth)
