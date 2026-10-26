@@ -93,9 +93,10 @@ targets: [
 ZLRichLabel/Classes/
 ├── ZLAttributedLabel.swift                底层富文本 Label：属性定义、文字设置、初始化
 ├── ZLAttributedLabel+Layout.swift         排版：字号自适应、textRect / sizeThatFits、字符定位、截断
-├── ZLAttributedLabel+Drawing.swift        绘制：CoreText 绘制文字，补充背景色与删除线
+├── ZLAttributedLabel+Drawing.swift        绘制：CoreText 绘制文字，补充背景色、删除线与图片附件
 ├── ZLAttributedLabel+Link.swift           链接与触摸：添加 / 查找链接、自动识别、按下样式、点击与长按
 ├── ZLAttributedLabel+Accessibility.swift  无障碍：每个链接单独可聚焦、可激活
+├── ZLAttributedLabel+Attachment.swift     图片附件：NSTextAttachment 占位与绘制
 ├── ZLRichDefines.swift    样式类型 ZLTextStyle、内嵌 View 配置 ZLRichWidget
 ├── ZLRichRule.swift       ZLRichRule / ZLRichMatch / ZLRichRuleContext / ZLRichParser
 ├── ZLRichLabel.swift      基类：属性定义、规则解析、渲染与缓存、内嵌 View（附件）
@@ -212,7 +213,7 @@ handler 通过 `ctx` 读取命中信息，并写入要展示的内容：
 | `addLink(range:highlightStyle:onTap:onLongPress:)` | 给内容中的一段单独设置点击 / 长按 / 按下高亮，回调参数同样是命中；可以添加多段、可以互相包含，重叠时后添加的优先（嵌套标签就是先加外层、再加内层） |
 | `highlightStyle` | 按下高亮，`nil` 使用 label 的 `highlightStyle`，`[:]` 不高亮 |
 
-插入图片：直接放 `NSTextAttachment` 即可，组件会自动转换成 `UIImageView` 显示（CoreText 本身不绘制 attachment）：
+插入图片：直接放 `NSTextAttachment` 即可，组件会自动转换成 `UIImageView` 显示（点击整个命中、复用 View；单独使用 `ZLAttributedLabel` 时由基类直接绘制，见「图片附件」）：
 
 ```swift
 try? label.addRule(name: "emoji", pattern: "\\[(smile|heart)\\]") { ctx in
@@ -477,7 +478,7 @@ ZLTagParser.tags("<h1>a</h1>")        // 独立解析 <h> 标签，不创建 lab
 | `textInsets` | 内边距，默认 `.zero`；尺寸计算、点击、截断、字符定位都按内边距偏移 |
 | `verticalAlignment` | label 比内容高时的垂直对齐：`.center`（默认）/ `.top` / `.bottom`（OC：`ZLLabelVerticalAlignmentTop` 等） |
 | `numberOfLines` / `lineBreakMode` | 行数限制与截断；多行时只截断最后一行（尾部），单行时支持头 / 中 / 尾 |
-| `attributedTruncationToken` | 自定义截断符，例如「…更多」，nil 时为 `…` |
+| `attributedTruncationToken` | 自定义截断符，例如「…更多」，nil 时为 `…`。纯文本 / 富文本、单行（头 / 中 / 尾）/ 多行都生效；单行按字符截断。截断方式以 label 的 `lineBreakMode` 为准，富文本段落样式中的截断模式按换行处理 |
 | `sizeThatFits(_:)` / `intrinsicContentSize` | 包含内边距，按「宽度 + 行数」缓存；多行时 Auto Layout 宽度变化后自动重新计算高度 |
 | `preferredMaxLayoutWidth` | 大于 0 时 `intrinsicContentSize` 按这个宽度计算 |
 | `adjustsFontSizeToFitWidth` / `minimumScaleFactor` | 字号自适应：放不下时按同一比例缩小所有字体（含截断符），最小到 `minimumScaleFactor`（为 0 时不缩小，与 `UILabel` 相同）。单行按宽度，多行按 `numberOfLines` 与 label 高度判断；不缩放字间距、行距与内嵌 View；`sizeThatFits` 仍按原字号计算 |
@@ -542,7 +543,33 @@ label.text = @"阅读并同意《用户协议》";
 label.delegate = self;   // attributedLabel:didSelectLinkWithURL: / attributedLabel:didSelectLink: / attributedLabel:didLongPressLink:atPoint:
 ```
 
-暂不支持：`ZLAttributedLabel` 本身不绘制 `NSTextAttachment` 图片（`ZLRichLabel` 会把附件转换成 View 显示）。
+### 图片附件（NSTextAttachment）
+
+`ZLAttributedLabel` 直接绘制富文本中的 `NSTextAttachment` 图片，可以和文字一起换行、截断、作为链接点击：
+
+| 规则 | 说明 |
+| --- | --- |
+| 尺寸 | `attachment.bounds` 不为空时按 bounds；`bounds.origin.y` 是相对基线的偏移（负数往下）。为空时按图片尺寸，底部对齐基线 |
+| 行高 | 图片比文字高时撑高所在行，`sizeThatFits` / Auto Layout 自动包含 |
+| 颜色 | 模板图片（`.alwaysTemplate`）和 SF Symbol 按所在位置的文字颜色（`.foregroundColor`）着色，因此也跟随链接按下样式和高亮文字颜色；普通图片按原色 |
+| 链接 | 图片所在字符可以加链接，点击、按下样式、字符定位与文字相同 |
+| 截断符 | `attributedTruncationToken` 中也可以放图片 |
+| 字号自适应 | 缩小字体时图片不缩放（与 `ZLRichLabel` 的内嵌 View 一致） |
+
+```swift
+let font = UIFont.systemFont(ofSize: 15)
+let attachment = NSTextAttachment()
+attachment.image = UIImage(systemName: "star.fill")
+// 高 18，与文字垂直居中
+attachment.bounds = CGRect(x: 0, y: (font.capHeight - 18) / 2, width: 18, height: 18)
+
+let text = NSMutableAttributedString(string: "评分 ", attributes: [.font: font])
+text.append(NSAttributedString(attachment: attachment))
+text.addAttribute(.foregroundColor, value: UIColor.systemOrange, range: NSRange(location: 3, length: 1))
+label.attributedText = text
+```
+
+`ZLRichLabel` 中规则 handler 插入的 `NSTextAttachment` 仍会转换成 `UIImageView`（以便点击整个命中、复用 View）；直接设置给 `ZLRichLabel.attributedText` 的富文本按上面的方式由基类绘制。
 
 ## 通用配置
 
@@ -1010,6 +1037,7 @@ Example 工程通过 Swift Package Manager 引用仓库根目录的本地包（`
 | 11 | 尺寸与定位：点击文字用 `characterIndex(at:)` + `boundingRect(forCharacterRange:)` 框出所在的词；Frame 布局下用 `sizeThatFits` 计算高度 |
 | 12 | VoiceOver：打印 `accessibilityElements`，链接单独聚焦，`accessibilityHintText` |
 | 13 | 字号自适应 `adjustsFontSizeToFitWidth`：单行标题（带链接）、2 行、固定高度三个 label；切换宽度、开关、`minimumScaleFactor`，实时显示 `currentFontScaleFactor` |
+| 14 | 图片附件 `NSTextAttachment`：SF Symbol 按文字颜色着色、彩色徽章按原色、图片作为链接（按下变浅）；切换图片高度观察行高与换行；截断符中的图片 |
 
 ## Author
 

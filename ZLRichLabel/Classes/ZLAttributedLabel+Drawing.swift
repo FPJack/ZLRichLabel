@@ -40,6 +40,7 @@ extension ZLAttributedLabel {
             context.textPosition = item.position
             CTLineDraw(item.line, context)
         }
+        drawTextAttachments(lines.map { ($0.line, $0.position) }, in: context)
         drawStrikethroughs(lines, in: context)
     }
 

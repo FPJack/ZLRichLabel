@@ -364,6 +364,9 @@ extension ZLAttributedLabel {
               lastRange.location + lastRange.length < text.length else { return nil }
 
         let mode: NSLineBreakMode = lineCount != 1 ? .byTruncatingTail : lineBreakMode
+        if lineCount == 1 {
+            return singleLineTruncation(start: lastRange.location, in: text, mode: mode, width: width, scale: scale)
+        }
         var position = lastRange.location
         let type: CTLineTruncationType
         switch mode {
@@ -394,6 +397,43 @@ extension ZLAttributedLabel {
         let truncationLine = CTLineCreateWithAttributedString(truncationString as CFAttributedString)
         let result = CTLineCreateTruncatedLine(truncationLine, width, type, tokenLine) ?? tokenLine
         return (result, truncationString)
+    }
+
+    /// 单行截断：按整个段落（不是按词换行后的第一行）截断，与 UILabel 一致可以截断到字符；
+    /// 头部 / 中间截断显示段落的结尾。后面还有其他段落时尾部截断强制显示截断符
+    private func singleLineTruncation(start: Int, in text: NSAttributedString, mode: NSLineBreakMode,
+                                      width: Double, scale: CGFloat) -> (line: CTLine, string: NSAttributedString) {
+        let ns = text.string as NSString
+        var end = start
+        var contentsEnd = start
+        ns.getParagraphStart(nil, end: &end, contentsEnd: &contentsEnd,
+                             for: NSRange(location: start, length: 0))
+        let hasMoreText = end < ns.length
+        let source = NSMutableAttributedString(
+            attributedString: text.attributedSubstring(from: NSRange(location: start, length: max(0, contentsEnd - start))))
+
+        let type: CTLineTruncationType
+        let tokenPosition: Int
+        switch mode {
+        case .byTruncatingHead:
+            type = .start
+            tokenPosition = start
+        case .byTruncatingMiddle:
+            type = .middle
+            tokenPosition = start + source.length / 2
+        default:
+            type = .end
+            tokenPosition = max(start, contentsEnd - 1)
+        }
+        let token = attributedTruncationToken.map { ZLAttributedLabel.scaledText($0, scale: scale) }
+            ?? NSAttributedString(string: "\u{2026}",
+                                  attributes: text.attributes(at: min(max(0, tokenPosition), text.length - 1), effectiveRange: nil))
+        let tokenLine = CTLineCreateWithAttributedString(token as CFAttributedString)
+        // 段落放得下但后面还有内容：先拼接截断符（与多行时一致）
+        if type == .end && hasMoreText { source.append(token) }
+        let sourceLine = CTLineCreateWithAttributedString(source as CFAttributedString)
+        let result = CTLineCreateTruncatedLine(sourceLine, width, type, tokenLine) ?? tokenLine
+        return (result, source)
     }
 
     /// 是否截断最后一行

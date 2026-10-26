@@ -11,7 +11,7 @@
 //  - VoiceOver：每个链接单独作为可点击的无障碍元素
 //  - 字号自适应：`adjustsFontSizeToFitWidth` + `minimumScaleFactor`（单行按宽度，多行按行数与高度）
 //
-//  不支持：NSTextAttachment 绘制（ZLRichLabel 会把附件转换为 View）
+//  - 图片附件：NSTextAttachment 按 bounds（或图片尺寸）占位并绘制，模板图片按文字颜色着色
 //
 
 import UIKit
@@ -156,6 +156,9 @@ open class ZLAttributedLabel: UILabel {
         }
         let mutable = NSMutableAttributedString(attributedString: text)
         fillMissingAttributes(in: mutable)
+        ZLAttributedLabel.replaceTruncatingLineBreaks(in: mutable)
+        // NSTextAttachment：加 CTRunDelegate 占位，绘制时画出图片（见 ZLAttributedLabel+Attachment.swift）
+        ZLAttributedLabel.prepareTextAttachments(in: mutable)
         let detected = detectLinks(in: mutable)
         for link in detected {
             if let attrs = link.attributes, !attrs.isEmpty { mutable.addAttributes(attrs, range: link.range) }
@@ -180,6 +183,21 @@ open class ZLAttributedLabel: UILabel {
         setNeedsDisplay()
     }
 
+    static func isTruncatingMode(_ mode: NSLineBreakMode) -> Bool {
+        return mode == .byTruncatingHead || mode == .byTruncatingMiddle || mode == .byTruncatingTail
+    }
+
+    /// 段落样式中的截断模式改为按词换行：CoreText 遇到截断模式会把每个段落排成一行并自己截断，
+    /// 既不能多行显示，也不会使用 `attributedTruncationToken`。截断方式以 label 的 `lineBreakMode` 为准
+    static func replaceTruncatingLineBreaks(in text: NSMutableAttributedString) {
+        text.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: text.length), options: []) { value, range, _ in
+            guard let style = value as? NSParagraphStyle, isTruncatingMode(style.lineBreakMode),
+                  let copy = style.mutableCopy() as? NSMutableParagraphStyle else { return }
+            copy.lineBreakMode = .byWordWrapping
+            text.addAttribute(.paragraphStyle, value: copy, range: range)
+        }
+    }
+
     /// 富文本中没有字体 / 颜色的部分补上 label 的字体 / 颜色（CoreText 默认是 12pt 黑色）
     private func fillMissingAttributes(in text: NSMutableAttributedString) {
         let full = NSRange(location: 0, length: text.length)
@@ -197,7 +215,9 @@ open class ZLAttributedLabel: UILabel {
     open func labelAttributes() -> ZLTextStyle {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = textAlignment
-        paragraph.lineBreakMode = numberOfLines == 1 ? lineBreakMode : .byWordWrapping
+        // 截断模式不交给 CoreText：CoreText 自己截断时会忽略 attributedTruncationToken，统一由 truncatedLine 截断
+        paragraph.lineBreakMode = numberOfLines == 1 && !ZLAttributedLabel.isTruncatingMode(lineBreakMode)
+            ? lineBreakMode : .byWordWrapping
         return [.font: font ?? UIFont.systemFont(ofSize: 17),
                 .foregroundColor: textColor ?? UIColor.black,
                 .paragraphStyle: paragraph]
@@ -266,9 +286,15 @@ open class ZLAttributedLabel: UILabel {
         }
     }
 
-    /// 截断时显示在末尾的富文本，nil 时使用 "…"（与截断处文字的样式相同）
+    /// 截断时显示在末尾的富文本，nil 时使用 "…"（与截断处文字的样式相同）。可以包含 NSTextAttachment 图片
     open var attributedTruncationToken: NSAttributedString? {
-        didSet { setNeedsDisplay() }
+        didSet {
+            if let token = attributedTruncationToken {
+                let prepared = ZLAttributedLabel.preparingTextAttachments(in: token)
+                if prepared !== token { attributedTruncationToken = prepared }
+            }
+            setNeedsDisplay()
+        }
     }
 
     /// 文字阴影的模糊半径（配合 `shadowColor` / `shadowOffset`）

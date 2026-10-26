@@ -46,6 +46,7 @@ final class AttributedLabelDemoPage: UIViewController, ZLAttributedLabelDelegate
         demoGeometry()
         demoAccessibility()
         demoAdjustsFontSize()
+        demoTextAttachments()
     }
 
     // MARK: - 布局
@@ -538,6 +539,89 @@ final class AttributedLabelDemoPage: UIViewController, ZLAttributedLabelDelegate
                     + "sizeThatFits 仍按原字号计算。切换宽度 / 开关 / 最小比例观察 scale",
                 [widthControl, toggleRow, minControl, container, info])
         DispatchQueue.main.async { refreshInfo() }
+    }
+
+    // MARK: - 14. 图片附件 NSTextAttachment
+
+    /// 彩色徽章图片（非模板图片，按原色绘制）
+    private static func badgeImage(_ text: String, colors: [UIColor], height: CGFloat) -> UIImage {
+        let font = UIFont.boldSystemFont(ofSize: height * 0.55)
+        let textSize = (text as NSString).size(withAttributes: [.font: font])
+        let size = CGSize(width: ceil(textSize.width + height * 0.7), height: height)
+        return UIGraphicsImageRenderer(size: size).image { ctx in
+            let rect = CGRect(origin: .zero, size: size)
+            UIBezierPath(roundedRect: rect, cornerRadius: height / 2).addClip()
+            let cgColors = colors.map { $0.cgColor } as CFArray
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: cgColors, locations: nil) {
+                ctx.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: size.width, y: 0), options: [])
+            }
+            (text as NSString).draw(at: CGPoint(x: (size.width - textSize.width) / 2, y: (size.height - textSize.height) / 2),
+                                    withAttributes: [.font: font, .foregroundColor: UIColor.white])
+        }
+    }
+
+    /// 图片附件：高度 height，与 font 的文字垂直居中（bounds.y 为相对基线的偏移）
+    private static func attachment(_ image: UIImage, height: CGFloat, font: UIFont) -> NSAttributedString {
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        let width = image.size.width * height / max(image.size.height, 1)
+        attachment.bounds = CGRect(x: 0, y: (font.capHeight - height) / 2, width: width, height: height)
+        return NSAttributedString(attachment: attachment)
+    }
+
+    private func demoTextAttachments() {
+        let font = UIFont.systemFont(ofSize: 15)
+        let star = UIImage(systemName: "star.fill")!            // SF Symbol：按文字颜色着色
+        let heart = UIImage(systemName: "heart.fill")!
+        let label = makeLabel()
+        let tapCount = UILabel.small("点击 ❤️ 图片链接：0 次")
+        var taps = 0
+
+        let build: (CGFloat) -> Void = { [weak self] iconHeight in
+            let text = NSMutableAttributedString(string: "SF Symbol 跟随文字颜色 ", attributes: [.font: font])
+            let orange = NSMutableAttributedString(attributedString: Self.attachment(star, height: iconHeight, font: font))
+            orange.addAttribute(.foregroundColor, value: UIColor.mDeepOrange, range: NSRange(location: 0, length: orange.length))
+            text.append(orange)
+            text.append(NSAttributedString(string: "，彩色图片按原色 ", attributes: [.font: font]))
+            text.append(Self.attachment(Self.badgeImage("VIP", colors: [.mDeepPurple, .mBlue], height: 40),
+                                        height: iconHeight, font: font))
+            text.append(NSAttributedString(string: "，图片也可以作为链接：", attributes: [.font: font]))
+            let heartLocation = text.length
+            let red = NSMutableAttributedString(attributedString: Self.attachment(heart, height: iconHeight, font: font))
+            red.addAttribute(.foregroundColor, value: UIColor.systemRed, range: NSRange(location: 0, length: red.length))
+            text.append(red)
+            text.append(NSAttributedString(string: "（按下变浅）。图片尺寸变大时行高跟着变高，文字按图片宽度重新换行。",
+                                           attributes: [.font: font]))
+            label.attributedText = text
+            label.addLink(ZLLabelLink(range: NSRange(location: heartLocation, length: 1), attributes: nil,
+                                      activeAttributes: [.foregroundColor: UIColor.systemRed.withAlphaComponent(0.35)],
+                                      onTap: { _, _ in
+                                          taps += 1
+                                          tapCount.text = "点击 ❤️ 图片链接：\(taps) 次"
+                                          self?.log("点击图片链接 ❤️（第 \(taps) 次）")
+                                      }))
+            self?.relayout()
+        }
+        build(18)
+        let sizes: [CGFloat] = [14, 18, 28, 40]
+        let sizeControl = segmented(["14", "18", "28", "40"], selected: 1) { index in build(sizes[index]) }
+
+        // 截断符中的图片
+        let truncated = makeLabel(lines: 1)
+        let token = NSMutableAttributedString(string: "… ", attributes: [.font: font, .foregroundColor: UIColor.mBlue])
+        let more = NSMutableAttributedString(attributedString: Self.attachment(UIImage(systemName: "chevron.down.circle.fill")!,
+                                                                               height: 16, font: font))
+        more.addAttribute(.foregroundColor, value: UIColor.mBlue, range: NSRange(location: 0, length: more.length))
+        token.append(more)
+        truncated.attributedTruncationToken = token
+        truncated.attributedText = NSAttributedString(
+            string: "单行截断：截断符 attributedTruncationToken 中也可以放图片，这段文字足够长会被截断。",
+            attributes: [.font: font])
+
+        addCard("14. 图片附件 NSTextAttachment",
+                "基类直接绘制图片：bounds 不为空时按 bounds（y 为相对基线的偏移），否则按图片尺寸；"
+                    + "模板图片 / SF Symbol 按文字颜色着色。切换图片高度观察行高与换行",
+                [sizeControl, label, tapCount, truncated])
     }
 
     // MARK: - ZLAttributedLabelDelegate

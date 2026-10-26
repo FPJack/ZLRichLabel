@@ -2191,3 +2191,311 @@ private extension ZLAttributedLabel {
         return rect == .zero ? nil : rect
     }
 }
+
+// MARK: - ZLAttributedLabel 绘制 NSTextAttachment
+
+class AttributedLabelTextAttachmentTests: XCTestCase {
+
+    private func solidImage(_ color: UIColor, size: CGSize) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            color.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+        }
+    }
+
+    private func attachmentString(_ image: UIImage, bounds: CGRect = .zero) -> NSAttributedString {
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        attachment.bounds = bounds
+        return NSAttributedString(attachment: attachment)
+    }
+
+    private func makeLabel(_ text: NSAttributedString, width: CGFloat = 300, lines: Int = 0) -> ZLAttributedLabel {
+        let label = ZLAttributedLabel(frame: CGRect(x: 0, y: 0, width: width, height: 0))
+        label.numberOfLines = lines
+        label.font = .systemFont(ofSize: 15)
+        label.attributedText = text
+        label.frame.size.height = label.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
+        label.layoutIfNeeded()
+        return label
+    }
+
+    private func render(_ label: UIView) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.preferredRange = .standard   // 8 位 RGBA，按 4 字节读取像素
+        return UIGraphicsImageRenderer(bounds: label.bounds, format: format).image { ctx in
+            label.layer.render(in: ctx.cgContext)
+        }
+    }
+
+    /// 符合条件的像素数，以及它们的外接矩形
+    private func pixels(_ image: UIImage, matching: (UInt8, UInt8, UInt8) -> Bool) -> (count: Int, rect: CGRect) {
+        guard let cg = image.cgImage, let data = cg.dataProvider?.data, let ptr = CFDataGetBytePtr(data) else { return (0, .null) }
+        var count = 0
+        var rect = CGRect.null
+        for y in 0..<cg.height {
+            for x in 0..<cg.width {
+                let i = y * cg.bytesPerRow + x * 4
+                let (c0, c1, c2) = (ptr[i], ptr[i + 1], ptr[i + 2])
+                let hit = cg.bitmapInfo.contains(.byteOrder32Little) ? matching(c2, c1, c0) : matching(c0, c1, c2)
+                if hit {
+                    count += 1
+                    rect = rect.union(CGRect(x: x, y: y, width: 1, height: 1))
+                }
+            }
+        }
+        return (count, rect)
+    }
+
+    private let isGreen: (UInt8, UInt8, UInt8) -> Bool = { r, g, b in g > 200 && r < 60 && b < 60 }
+    private let isRed: (UInt8, UInt8, UInt8) -> Bool = { r, g, b in r > 200 && g < 60 && b < 60 }
+
+    func testImageAttachmentReservesSpaceAndIsDrawnAtItsPosition() {
+        let text = NSMutableAttributedString(string: "AB")
+        let plainWidth = makeLabel(text).sizeThatFits(CGSize(width: 300, height: 1000)).width
+        text.insert(attachmentString(solidImage(.green, size: CGSize(width: 20, height: 20)),
+                                     bounds: CGRect(x: 0, y: -4, width: 20, height: 20)), at: 1)
+        let label = makeLabel(text)
+
+        // 占位：宽度增加 20
+        let width = label.sizeThatFits(CGSize(width: 300, height: 1000)).width
+        XCTAssertEqual(width - plainWidth, 20, accuracy: 1, "附件按 bounds 宽度占位")
+
+        // 绘制：整张图片画出来，位置与附件字符的矩形一致
+        let green = pixels(render(label), matching: isGreen)
+        XCTAssertGreaterThan(green.count, 300, "图片被绘制（20×20）")
+        let charRect = label.boundingRect(forCharacterRange: NSRange(location: 1, length: 1))
+        XCTAssertEqual(green.rect.minX, charRect.minX, accuracy: 1.5, "图片在附件字符的位置")
+        XCTAssertEqual(green.rect.width, 20, accuracy: 1.5)
+        XCTAssertEqual(green.rect.height, 20, accuracy: 1.5)
+
+        // 基线偏移：bounds.y = -4，图片底部在 "A" 的基线下方 4pt
+        let aRect = label.boundingRect(forCharacterRange: NSRange(location: 0, length: 1))
+        let baselineY = aRect.maxY + UIFont.systemFont(ofSize: 15).descender   // 行底 + descender（负数）= 基线
+        XCTAssertEqual(green.rect.maxY, baselineY + 4, accuracy: 2, "图片按 bounds.y 相对基线偏移")
+    }
+
+    func testZeroBoundsUsesImageSize() {
+        let text = NSMutableAttributedString(string: "A")
+        text.append(attachmentString(solidImage(.green, size: CGSize(width: 30, height: 12))))
+        let label = makeLabel(text)
+        let green = pixels(render(label), matching: isGreen)
+        XCTAssertEqual(green.rect.width, 30, accuracy: 1.5, "bounds 为空时使用图片尺寸")
+        XCTAssertEqual(green.rect.height, 12, accuracy: 1.5)
+    }
+
+    func testTallAttachmentIncreasesLineHeight() {
+        let plain = makeLabel(NSAttributedString(string: "A")).bounds.height
+        let text = NSMutableAttributedString(string: "A")
+        text.append(attachmentString(solidImage(.green, size: CGSize(width: 10, height: 60))))
+        let label = makeLabel(text)
+        XCTAssertGreaterThan(label.bounds.height, plain + 30, "高附件撑高行高")
+        XCTAssertEqual(pixels(render(label), matching: isGreen).rect.height, 60, accuracy: 1.5, "高附件完整绘制，不被裁掉")
+    }
+
+    func testTemplateImageIsTintedWithTextColor() {
+        let template = solidImage(.black, size: CGSize(width: 20, height: 20)).withRenderingMode(.alwaysTemplate)
+        let text = NSMutableAttributedString(attributedString: attachmentString(template))
+        text.addAttribute(.foregroundColor, value: UIColor.red, range: NSRange(location: 0, length: text.length))
+        let label = makeLabel(text)
+        XCTAssertGreaterThan(pixels(render(label), matching: isRed).count, 300, "模板图片按文字颜色着色")
+    }
+
+    func testAttachmentInTruncationToken() {
+        let token = NSMutableAttributedString(string: "…")
+        token.append(attachmentString(solidImage(.green, size: CGSize(width: 14, height: 14))))
+        let label = ZLAttributedLabel(frame: CGRect(x: 0, y: 0, width: 120, height: 30))
+        label.numberOfLines = 1
+        label.font = .systemFont(ofSize: 15)
+        label.attributedTruncationToken = token
+        // 注意：用 `text` 设置纯文本时自定义截断符不生效（原有问题，与附件无关），这里用 attributedText
+        label.attributedText = NSAttributedString(string: "A long long long long long long text")
+        label.layoutIfNeeded()
+        XCTAssertGreaterThan(pixels(render(label), matching: isGreen).count, 150, "截断符中的图片被绘制")
+    }
+
+    func testAttachmentWorksWithLinkHighlightAndCharacterIndex() {
+        let text = NSMutableAttributedString(string: "go ")
+        text.append(attachmentString(solidImage(.green, size: CGSize(width: 20, height: 20))))
+        text.append(NSAttributedString(string: " end"))
+        let label = makeLabel(text)
+        var tapped = false
+        label.addLink(range: NSRange(location: 3, length: 1)) { _, _ in tapped = true }
+        let rect = label.boundingRect(forCharacterRange: NSRange(location: 3, length: 1))
+        XCTAssertEqual(label.characterIndex(at: CGPoint(x: rect.midX, y: rect.midY)), 3, "点在图片上定位到附件字符")
+        if let link = label.link(at: CGPoint(x: rect.midX, y: rect.midY)) { label.performTap(on: link) }
+        XCTAssertTrue(tapped, "附件可作为链接点击")
+    }
+
+    func testRichLabelPassThroughAttributedTextDrawsAttachment() {
+        let text = NSMutableAttributedString(string: "A")
+        text.append(attachmentString(solidImage(.green, size: CGSize(width: 20, height: 20))))
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: 300, height: 0))
+        label.numberOfLines = 0
+        label.attributedText = text
+        label.frame.size.height = label.sizeThatFits(CGSize(width: 300, height: 1000)).height
+        label.layoutIfNeeded()
+        XCTAssertTrue(label.subviews.filter { $0 is UIImageView }.isEmpty, "直接设置的富文本由基类绘制，不创建 View")
+        XCTAssertGreaterThan(pixels(render(label), matching: isGreen).count, 300)
+    }
+
+    func testRichLabelRuleAttachmentsStillUseViews() {
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: 300, height: 0))
+        label.numberOfLines = 0
+        let image = solidImage(.green, size: CGSize(width: 20, height: 20))
+        try? label.addRule(name: "img", pattern: "\\[img\\]") { ctx in
+            let attachment = NSTextAttachment()
+            attachment.image = image
+            ctx.attributedString.setAttributedString(NSAttributedString(attachment: attachment))
+        }
+        label.text = "a [img] b"
+        label.frame.size.height = label.sizeThatFits(CGSize(width: 300, height: 1000)).height
+        label.layoutIfNeeded()
+        XCTAssertEqual(label.subviews.filter { $0 is UIImageView }.count, 1, "规则中的附件仍转换为 View（不重复绘制）")
+        // View 是隐藏后在 layoutSubviews 中显示的；只检查基类没有再额外画一份
+        let attr = label.attributedText!
+        var hasTextAttachment = false
+        attr.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attr.length), options: []) { v, _, _ in
+            if v != nil { hasTextAttachment = true }
+        }
+        XCTAssertFalse(hasTextAttachment)
+    }
+}
+
+// MARK: - 单行纯文本的自定义截断符 / 段落样式中的截断模式
+
+class TruncationTokenTests: XCTestCase {
+
+    private let long = "Hello world, this is a fairly long sentence that cannot fit in one line"
+
+    private func render(_ label: UIView) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.preferredRange = .standard   // 8 位 RGBA，按 4 字节读取像素
+        return UIGraphicsImageRenderer(bounds: label.bounds, format: format).image { ctx in
+            label.layer.render(in: ctx.cgContext)
+        }
+    }
+
+    /// 符合条件的像素的外接矩形（没有时为 .null）
+    private func inkRect(_ image: UIImage, matching: (UInt8, UInt8, UInt8, UInt8) -> Bool) -> CGRect {
+        guard let cg = image.cgImage, let data = cg.dataProvider?.data, let ptr = CFDataGetBytePtr(data) else { return .null }
+        var rect = CGRect.null
+        let little = cg.bitmapInfo.contains(.byteOrder32Little)
+        for y in 0..<cg.height {
+            for x in 0..<cg.width {
+                let i = y * cg.bytesPerRow + x * 4
+                let (r, g, b, a) = little ? (ptr[i + 2], ptr[i + 1], ptr[i], ptr[i + 3]) : (ptr[i], ptr[i + 1], ptr[i + 2], ptr[i + 3])
+                if matching(r, g, b, a) { rect = rect.union(CGRect(x: x, y: y, width: 1, height: 1)) }
+            }
+        }
+        return rect
+    }
+
+    private let isRed: (UInt8, UInt8, UInt8, UInt8) -> Bool = { r, g, b, a in a > 128 && r > 180 && g < 90 && b < 90 }
+    private let isBlack: (UInt8, UInt8, UInt8, UInt8) -> Bool = { r, g, b, a in a > 128 && r < 80 && g < 80 && b < 80 }
+
+    private func redToken() -> NSAttributedString {
+        return NSAttributedString(string: "…MORE", attributes: [.foregroundColor: UIColor.red,
+                                                                .font: UIFont.boldSystemFont(ofSize: 15)])
+    }
+
+    private func singleLineLabel(_ mode: NSLineBreakMode, token: NSAttributedString?, text: String) -> ZLAttributedLabel {
+        let label = ZLAttributedLabel(frame: CGRect(x: 0, y: 0, width: 240, height: 30))
+        label.numberOfLines = 1
+        label.font = .systemFont(ofSize: 15)
+        label.textColor = .black
+        label.lineBreakMode = mode
+        label.attributedTruncationToken = token
+        label.text = text
+        label.layoutIfNeeded()
+        return label
+    }
+
+    func testPlainTextSingleLineUsesCustomTokenForEveryMode() {
+        let tail = inkRect(render(singleLineLabel(.byTruncatingTail, token: redToken(), text: long)), matching: isRed)
+        XCTAssertFalse(tail.isNull, "尾部截断：纯文本也显示自定义截断符")
+        XCTAssertGreaterThan(tail.minX, 120, "尾部截断：截断符在右侧")
+
+        let head = inkRect(render(singleLineLabel(.byTruncatingHead, token: redToken(), text: long)), matching: isRed)
+        XCTAssertFalse(head.isNull, "头部截断：显示自定义截断符")
+        XCTAssertLessThan(head.maxX, 120, "头部截断：截断符在左侧")
+
+        let middle = inkRect(render(singleLineLabel(.byTruncatingMiddle, token: redToken(), text: long)), matching: isRed)
+        XCTAssertFalse(middle.isNull, "中间截断：显示自定义截断符")
+        XCTAssertTrue(middle.minX > 30 && middle.maxX < 210, "中间截断：截断符在中间，实际 \(middle)")
+    }
+
+    func testSingleLineTruncatesAtCharacterLevel() {
+        // 第二个词很长：按词换行时第一行只有 "AAAA "，截断应在字符级别，尽量填满宽度
+        let text = "AAAA BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+        let plain = singleLineLabel(.byTruncatingTail, token: redToken(), text: text)
+        let black = inkRect(render(plain), matching: isBlack)
+        let red = inkRect(render(plain), matching: isRed)
+        XCTAssertGreaterThan(black.maxX, 100, "长单词被截断到字符，而不是只显示第一个词")
+        XCTAssertFalse(red.isNull)
+        XCTAssertLessThanOrEqual(red.maxX, 240, "截断后不超出宽度")
+
+        // 富文本同样适用
+        let label = ZLAttributedLabel(frame: CGRect(x: 0, y: 0, width: 240, height: 30))
+        label.numberOfLines = 1
+        label.lineBreakMode = .byTruncatingHead
+        label.attributedTruncationToken = redToken()
+        label.attributedText = NSAttributedString(string: text, attributes: [.font: UIFont.systemFont(ofSize: 15),
+                                                                              .foregroundColor: UIColor.black])
+        label.layoutIfNeeded()
+        let headBlack = inkRect(render(label), matching: isBlack)
+        let headRed = inkRect(render(label), matching: isRed)
+        XCTAssertLessThan(headRed.maxX, headBlack.minX + 2, "头部截断：截断符在左、文字在右")
+        XCTAssertGreaterThan(headBlack.maxX, 200, "头部截断显示文字结尾")
+    }
+
+    func testDefaultEllipsisStillWorksForPlainSingleLine() {
+        let label = singleLineLabel(.byTruncatingTail, token: nil, text: long)
+        XCTAssertGreaterThan(inkRect(render(label), matching: isBlack).maxX, 200, "默认 … 截断时文字填满宽度")
+    }
+
+    func testSingleLineWithMoreParagraphsShowsToken() {
+        let label = singleLineLabel(.byTruncatingTail, token: redToken(), text: "Short\nSecond paragraph")
+        XCTAssertFalse(inkRect(render(label), matching: isRed).isNull, "第一段放得下但后面还有段落：显示截断符")
+    }
+
+    func testTruncatingParagraphStyleInAttributedTextStillWraps() {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let label = ZLAttributedLabel(frame: CGRect(x: 0, y: 0, width: 200, height: 0))
+        label.numberOfLines = 0
+        let font = UIFont.systemFont(ofSize: 15)
+        label.attributedText = NSAttributedString(string: long + " " + long,
+                                                  attributes: [.font: font, .paragraphStyle: paragraph])
+        let height = label.sizeThatFits(CGSize(width: 200, height: CGFloat.greatestFiniteMagnitude)).height
+        XCTAssertGreaterThan(height, font.lineHeight * 3, "段落样式里的截断模式不能让多行文字变成一行")
+
+        // 限制 2 行时最后一行显示自定义截断符
+        label.numberOfLines = 2
+        label.attributedTruncationToken = redToken()
+        label.frame.size.height = label.sizeThatFits(CGSize(width: 200, height: CGFloat.greatestFiniteMagnitude)).height
+        label.layoutIfNeeded()
+        let red = inkRect(render(label), matching: isRed)
+        XCTAssertFalse(red.isNull)
+        XCTAssertGreaterThan(red.minY, label.bounds.height / 2, "截断符在第二行")
+    }
+
+    func testRichLabelSingleLineHeadTruncation() {
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: 240, height: 30))
+        label.numberOfLines = 1
+        label.textColor = .black
+        label.font = .systemFont(ofSize: 15)
+        label.lineBreakMode = .byTruncatingHead
+        label.truncationToken = redToken()
+        label.text = long
+        label.layoutIfNeeded()
+        let red = inkRect(render(label), matching: isRed)
+        let black = inkRect(render(label), matching: isBlack)
+        XCTAssertFalse(red.isNull, "ZLRichLabel 单行头部截断显示截断符")
+        XCTAssertLessThan(red.maxX, black.minX + 2, "截断符在文字左侧")
+    }
+}
