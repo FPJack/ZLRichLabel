@@ -15,6 +15,7 @@
 //  10. 高亮：isHighlighted + highlightedTextColor
 //  11. 尺寸与定位：sizeThatFits、characterIndex(at:)、boundingRect(forCharacterRange:)
 //  12. VoiceOver：每个链接单独作为无障碍元素
+//  13. 字号自适应：adjustsFontSizeToFitWidth + minimumScaleFactor（单行按宽度、多行按行数 / 高度）
 //
 
 import UIKit
@@ -44,6 +45,7 @@ final class AttributedLabelDemoPage: UIViewController, ZLAttributedLabelDelegate
         demoHighlighted()
         demoGeometry()
         demoAccessibility()
+        demoAdjustsFontSize()
     }
 
     // MARK: - 布局
@@ -458,6 +460,84 @@ final class AttributedLabelDemoPage: UIViewController, ZLAttributedLabelDelegate
         }
         addCard("12. VoiceOver", "有链接时 label 作为容器：整段文字 + 每个链接；ZLLabelLink.accessibilityHintText 为附加说明",
                 [inspect, label])
+    }
+
+    // MARK: - 13. 字号自适应
+
+    private func demoAdjustsFontSize() {
+        // 单行：宽度不够时缩小，带链接验证缩小后点击位置正确
+        let single = makeLabel(lines: 1)
+        let singleString = "单行标题：宽度不够时整体缩小字号，链接 仍可点击"
+        single.text = singleString
+        single.font = .boldSystemFont(ofSize: 22)
+        single.adjustsFontSizeToFitWidth = true
+        single.minimumScaleFactor = 0.5
+        single.backgroundColor = UIColor(hex: 0xF3EDF7)
+        single.addLink(range: (singleString as NSString).range(of: "链接")) { [weak self] label, _ in
+            self?.log("缩小后点击链接，scale = \(String(format: "%.2f", label.currentFontScaleFactor))")
+        }
+
+        // 多行：限制 2 行，放不下时缩小
+        let multi = makeLabel(lines: 2)
+        multi.text = "多行（numberOfLines = 2）：超过 2 行时缩小字号，尽量在 2 行内显示完整；"
+            + "缩到 minimumScaleFactor 仍放不下时按尾部截断。这段文字比较长，用来观察缩放效果。"
+        multi.font = .systemFont(ofSize: 18)
+        multi.adjustsFontSizeToFitWidth = true
+        multi.minimumScaleFactor = 0.5
+        multi.backgroundColor = UIColor(hex: 0xF3EDF7)
+
+        // 不限行数 + 固定高度：按高度缩小
+        let fixed = makeLabel(lines: 0)
+        fixed.text = "不限行数（numberOfLines = 0）+ 固定高度 60：文字高度超过 label 高度时缩小字号。"
+            + "富文本中的各段字体按同一比例缩小。"
+        fixed.font = .systemFont(ofSize: 18)
+        fixed.verticalAlignment = .top
+        fixed.adjustsFontSizeToFitWidth = true
+        fixed.minimumScaleFactor = 0.4
+        fixed.backgroundColor = UIColor(hex: 0xF3EDF7)
+        fixed.heightAnchor.constraint(equalToConstant: 60).isActive = true
+
+        let labels = [single, multi, fixed]
+        let info = UILabel.small("")
+        info.numberOfLines = 0
+        let refreshInfo: () -> Void = { [weak self, weak info] in
+            self?.view.layoutIfNeeded()
+            info?.text = labels.enumerated().map { index, label in
+                "label\(index + 1): adjusts = \(label.adjustsFontSizeToFitWidth), "
+                    + "min = \(String(format: "%.1f", label.minimumScaleFactor)), scale = \(String(format: "%.2f", label.currentFontScaleFactor))"
+            }.joined(separator: "\n")
+            print("[ZLAttributedLabel] 13.\n\(info?.text ?? "")")
+        }
+
+        // 宽度：通过左右间距改变 label 宽度
+        let container = UIStackView(arrangedSubviews: labels)
+        container.axis = .vertical
+        container.spacing = 8
+        container.isLayoutMarginsRelativeArrangement = true
+        let widths: [CGFloat] = [0, 40, 80]
+        let widthControl = segmented(["宽", "中", "窄"], selected: 0) { [weak self] index in
+            container.layoutMargins = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: widths[index])
+            self?.relayout()
+            refreshInfo()
+        }
+        let toggle = UISwitch()
+        toggle.isOn = true
+        toggle.addAction(UIAction { _ in
+            labels.forEach { $0.adjustsFontSizeToFitWidth = toggle.isOn }
+            refreshInfo()
+        }, for: .valueChanged)
+        let toggleRow = UIStackView(arrangedSubviews: [UILabel.small("adjustsFontSizeToFitWidth"), toggle])
+        toggleRow.alignment = .center
+        let minimums: [CGFloat] = [0.3, 0.5, 0.8, 0]
+        let minControl = segmented(["min 0.3", "0.5", "0.8", "0(不缩)"], selected: 1) { index in
+            labels.forEach { $0.minimumScaleFactor = minimums[index] }
+            refreshInfo()
+        }
+        addCard("13. 字号自适应 adjustsFontSizeToFitWidth",
+                "单行按宽度、多行按行数与高度缩小字体，最小到 minimumScaleFactor（为 0 时不缩小，与 UILabel 相同）；"
+                    + "sizeThatFits 仍按原字号计算。切换宽度 / 开关 / 最小比例观察 scale",
+                [widthControl, toggleRow, minControl, container, info])
+        DispatchQueue.main.async { refreshInfo() }
     }
 
     // MARK: - ZLAttributedLabelDelegate

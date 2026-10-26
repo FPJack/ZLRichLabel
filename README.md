@@ -474,6 +474,8 @@ ZLTagParser.tags("<h1>a</h1>")        // 独立解析 <h> 标签，不创建 lab
 | `attributedTruncationToken` | 自定义截断符，例如「…更多」，nil 时为 `…` |
 | `sizeThatFits(_:)` / `intrinsicContentSize` | 包含内边距，按「宽度 + 行数」缓存；多行时 Auto Layout 宽度变化后自动重新计算高度 |
 | `preferredMaxLayoutWidth` | 大于 0 时 `intrinsicContentSize` 按这个宽度计算 |
+| `adjustsFontSizeToFitWidth` / `minimumScaleFactor` | 字号自适应：放不下时按同一比例缩小所有字体（含截断符），最小到 `minimumScaleFactor`（为 0 时不缩小，与 `UILabel` 相同）。单行按宽度，多行按 `numberOfLines` 与 label 高度判断；不缩放字间距、行距与内嵌 View；`sizeThatFits` 仍按原字号计算 |
+| `currentFontScaleFactor` | 当前实际使用的缩放比例，1 表示未缩小 |
 
 ### 链接
 
@@ -534,7 +536,7 @@ label.text = @"阅读并同意《用户协议》";
 label.delegate = self;   // attributedLabel:didSelectLinkWithURL: / attributedLabel:didSelectLink: / attributedLabel:didLongPressLink:atPoint:
 ```
 
-暂不支持：`adjustsFontSizeToFitWidth`；`NSTextAttachment` 图片由 `ZLRichLabel` 转换成 View 显示，`ZLAttributedLabel` 本身不绘制附件。
+暂不支持：`ZLAttributedLabel` 本身不绘制 `NSTextAttachment` 图片（`ZLRichLabel` 会把附件转换成 View 显示）。
 
 ## 通用配置
 
@@ -943,7 +945,7 @@ Example 工程通过 Swift Package Manager 引用仓库根目录的本地包（`
 | `HTagDemoPage.swift` | 首页 | `ZLTagRichLabel` / `ZLRichLabel` 全部功能，用例 1 – 29（见下表） |
 | `OCDemoViewController.m` | 导航栏左上角「OC」 | 与首页内容一致的 Objective-C 版本 |
 | `SwiftUIDemoPage.swift` | 导航栏右上角「SwiftUI」 | `ZLRichText`：基础用法与点击、输入时高度实时变化、展开 / 收起与 `@State` 同步、`.lineLimit`、规则 + 胶囊 + 渐变、`List` 中自适应行高 |
-| `AttributedLabelDemoPage.swift` | 导航栏右上角「Base」 | 底层 `ZLAttributedLabel`，用例 1 – 12（见下表） |
+| `AttributedLabelDemoPage.swift` | 导航栏右上角「Base」 | 底层 `ZLAttributedLabel`，用例 1 – 13（见下表） |
 
 首页用例：
 
@@ -982,6 +984,7 @@ Example 工程通过 Swift Package Manager 引用仓库根目录的本地包（`
 | 10 | 高亮 `isHighlighted` / `highlightedTextColor` |
 | 11 | 尺寸与定位：点击文字用 `characterIndex(at:)` + `boundingRect(forCharacterRange:)` 框出所在的词；Frame 布局下用 `sizeThatFits` 计算高度 |
 | 12 | VoiceOver：打印 `accessibilityElements`，链接单独聚焦，`accessibilityHintText` |
+| 13 | 字号自适应 `adjustsFontSizeToFitWidth`：单行标题（带链接）、2 行、固定高度三个 label；切换宽度、开关、`minimumScaleFactor`，实时显示 `currentFontScaleFactor` |
 
 ## Author
 

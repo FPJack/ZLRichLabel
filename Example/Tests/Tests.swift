@@ -1668,3 +1668,170 @@ class TextInsetsTests: XCTestCase {
 }
 
 
+
+/// 字号自适应：adjustsFontSizeToFitWidth + minimumScaleFactor
+class AdjustsFontSizeTests: XCTestCase {
+
+    private let longText = "The quick brown fox jumps over the lazy dog END"
+
+    private func makeLabel(width: CGFloat, height: CGFloat = 30, lines: Int = 1, text: String? = nil) -> ZLAttributedLabel {
+        let label = ZLAttributedLabel(frame: CGRect(x: 0, y: 0, width: width, height: height))
+        label.numberOfLines = lines
+        label.font = .systemFont(ofSize: 20)
+        label.text = text ?? longText
+        label.layoutIfNeeded()
+        return label
+    }
+
+    /// 末尾 "END" 中 "N" 的矩形（被截断或超出行数时为 .zero）；不取最后一个字：单行截断时截断符映射到最后一个字上
+    private func lastCharacterRect(_ label: ZLAttributedLabel) -> CGRect {
+        let length = label.attributedText?.length ?? 0
+        return label.boundingRect(forCharacterRange: NSRange(location: length - 2, length: 1))
+    }
+
+    func testDisabledByDefaultAndWithoutMinimum() {
+        let label = makeLabel(width: 120)
+        XCTAssertFalse(label.adjustsFontSizeToFitWidth)
+        XCTAssertEqual(label.currentFontScaleFactor, 1)
+        XCTAssertEqual(lastCharacterRect(label), .zero, "不缩小时单行被截断，最后一个字不可见")
+
+        label.adjustsFontSizeToFitWidth = true   // minimumScaleFactor 为 0：与 UILabel 相同，不缩小
+        XCTAssertEqual(label.currentFontScaleFactor, 1)
+    }
+
+    func testSingleLineShrinksToFitWidth() {
+        let label = makeLabel(width: 300)
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.3
+        let scale = label.currentFontScaleFactor
+        XCTAssertLessThan(scale, 1)
+        XCTAssertGreaterThanOrEqual(scale, 0.3)
+        let rect = lastCharacterRect(label)
+        XCTAssertNotEqual(rect, .zero, "缩小后整行放下，最后一个字可见")
+        XCTAssertLessThanOrEqual(rect.maxX, 300.5)
+        // 取能放下的最大比例：再放大 5% 就放不下
+        XCTAssertGreaterThan(scale, 0.3)
+        let wider = makeLabel(width: 300 * 1.06)
+        wider.adjustsFontSizeToFitWidth = true
+        wider.minimumScaleFactor = 0.3
+        XCTAssertGreaterThan(wider.currentFontScaleFactor, scale)
+    }
+
+    func testShortTextKeepsOriginalSize() {
+        let label = makeLabel(width: 300, text: "Short")
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.5
+        XCTAssertEqual(label.currentFontScaleFactor, 1)
+    }
+
+    func testMinimumScaleFactorIsLowerBoundAndTruncatesBeyond() {
+        let label = makeLabel(width: 80)
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.5
+        XCTAssertEqual(label.currentFontScaleFactor, 0.5, accuracy: 0.001, "放不下时停在最小比例")
+        XCTAssertEqual(lastCharacterRect(label), .zero, "最小比例仍放不下时照常截断")
+    }
+
+    func testMultilineShrinksToLineLimit() {
+        let label = makeLabel(width: 150, height: 200, lines: 2)
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.3
+        XCTAssertLessThan(label.currentFontScaleFactor, 1)
+        XCTAssertNotEqual(lastCharacterRect(label), .zero, "缩小后两行内显示全部文字")
+    }
+
+    func testUnlimitedLinesShrinkToHeight() {
+        let label = makeLabel(width: 150, height: 40, lines: 0)
+        label.verticalAlignment = .top
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.2
+        XCTAssertLessThan(label.currentFontScaleFactor, 1)
+        let rect = lastCharacterRect(label)
+        XCTAssertNotEqual(rect, .zero)
+        XCTAssertLessThanOrEqual(rect.maxY, 40.5, "缩小后文字在 label 高度内")
+    }
+
+    func testSizeThatFitsUsesOriginalFont() {
+        let plain = makeLabel(width: 300)
+        let adjusted = makeLabel(width: 300)
+        adjusted.adjustsFontSizeToFitWidth = true
+        adjusted.minimumScaleFactor = 0.3
+        let unlimited = CGSize(width: 300, height: CGFloat.greatestFiniteMagnitude)
+        XCTAssertEqual(adjusted.sizeThatFits(unlimited), plain.sizeThatFits(unlimited), "与 UILabel 相同：尺寸按原字号计算")
+    }
+
+    func testLinksAndCharacterIndexFollowScaledLayout() {
+        let label = makeLabel(width: 300)
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.3
+        let range = (longText as NSString).range(of: "END")
+        var tapped = false
+        label.addLink(range: range) { _, _ in tapped = true }
+        let rect = label.boundingRect(forCharacterRange: range)
+        XCTAssertNotEqual(rect, .zero)
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        XCTAssertTrue(NSLocationInRange(label.characterIndex(at: center), range))
+        guard let link = label.link(at: center) else { return XCTFail("缩小后按位置找到链接") }
+        label.performTap(on: link)
+        XCTAssertTrue(tapped)
+    }
+
+    func testTextAndSizeChangesRecompute() {
+        let label = makeLabel(width: 300)
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.3
+        XCTAssertLessThan(label.currentFontScaleFactor, 1)
+        label.text = "Short"
+        XCTAssertEqual(label.currentFontScaleFactor, 1, "文字变化后重新计算")
+        label.text = longText
+        let narrow = label.currentFontScaleFactor
+        label.frame.size.width = 600
+        XCTAssertGreaterThan(label.currentFontScaleFactor, narrow, "宽度变化后重新计算")
+    }
+
+    func testDrawsWithinBounds() {
+        let label = makeLabel(width: 200)
+        label.backgroundColor = .white
+        label.textColor = .black
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.3
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.preferredRange = .standard
+        let image = UIGraphicsImageRenderer(bounds: label.bounds, format: format).image { label.layer.render(in: $0.cgContext) }
+        guard let cg = image.cgImage, let ptr = CFDataGetBytePtr(cg.dataProvider!.data) else { return XCTFail() }
+        var maxDarkX = -1
+        for y in 0..<cg.height {
+            for x in 0..<cg.width {
+                let i = y * cg.bytesPerRow + x * 4
+                if Int(ptr[i]) + Int(ptr[i + 1]) + Int(ptr[i + 2]) < 300 { maxDarkX = max(maxDarkX, x) }
+            }
+        }
+        XCTAssertGreaterThan(maxDarkX, 150, "整行文字绘制到接近右边")
+        XCTAssertLessThan(maxDarkX, 200)
+    }
+
+    func testRichLabelRulesWorkWhenScaled() {
+        let label = ZLRichLabel(frame: CGRect(x: 0, y: 0, width: 220, height: 30))
+        label.numberOfLines = 1
+        var tapped: String?
+        label.update { v in
+            v.style = [.font: UIFont.systemFont(ofSize: 20)]
+            try? v.addRule(name: "mention", pattern: "@\\w+") { ctx in
+                ctx.addAttributes([.foregroundColor: UIColor.systemBlue])
+                ctx.onTap = { match in tapped = match.text }
+            }
+            v.text = "Hello everyone, please welcome @alice"
+        }
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.3
+        label.layoutIfNeeded()
+        XCTAssertLessThan(label.currentFontScaleFactor, 1)
+        let display = (label.attributedText?.string ?? "") as NSString
+        let rect = label.boundingRect(forCharacterRange: display.range(of: "@alice"))
+        XCTAssertNotEqual(rect, .zero, "缩小后 @alice 可见")
+        guard let link = label.link(at: CGPoint(x: rect.midX, y: rect.midY)) else { return XCTFail() }
+        label.performTap(on: link)
+        XCTAssertEqual(tapped, "@alice")
+    }
+}

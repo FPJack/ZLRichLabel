@@ -15,8 +15,8 @@
 		607FACE01AFB9204008FA782 /* LaunchScreen.xib in Resources */ = {isa = PBXBuildFile; fileRef = 607FACDE1AFB9204008FA782 /* LaunchScreen.xib */; };
 		607FACEC1AFB9204008FA782 /* Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 607FACEB1AFB9204008FA782 /* Tests.swift */; };
 		8447DF5B308AFBA800B30B72 /* OCDemoViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 8447DF5A308AFBA800B30B72 /* OCDemoViewController.m */; };
-		8447DF5D308AFBA800B30B72 /* AttributedLabelDemoPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8447DF5E308AFBA800B30B72 /* AttributedLabelDemoPage.swift */; };
 		8447DF5C308AFBA800B30B72 /* HTagDemoPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8447DF59308AFBA800B30B72 /* HTagDemoPage.swift */; };
+		8447DF5D308AFBA800B30B72 /* AttributedLabelDemoPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8447DF5E308AFBA800B30B72 /* AttributedLabelDemoPage.swift */; };
 		8465EBCD308B5B95009E1C9A /* ZLRichLabel in Frameworks */ = {isa = PBXBuildFile; productRef = 8465EBCC308B5B95009E1C9A /* ZLRichLabel */; };
 		A1B2C3D4E5F6A7B8C9D0E1F1 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* SceneDelegate.swift */; };
 		A1B2C3D4E5F6A7B8C9D0E1F3 /* SwiftUIDemoPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F4 /* SwiftUIDemoPage.swift */; };
@@ -49,10 +49,10 @@
 		607FACEA1AFB9204008FA782 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		607FACEB1AFB9204008FA782 /* Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests.swift; sourceTree = "<group>"; };
 		70741C9BEA80660FB0441EB2 /* Pods_ZLRichLabel_Example.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_ZLRichLabel_Example.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		8447DF5E308AFBA800B30B72 /* AttributedLabelDemoPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttributedLabelDemoPage.swift; sourceTree = "<group>"; };
 		8447DF59308AFBA800B30B72 /* HTagDemoPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTagDemoPage.swift; sourceTree = "<group>"; };
 		8447DF5A308AFBA800B30B72 /* OCDemoViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = OCDemoViewController.m; sourceTree = "<group>"; };
 		8447DF5D308AFBAC00B30B72 /* ZLRichLabel_Example-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "ZLRichLabel_Example-Bridging-Header.h"; sourceTree = "<group>"; };
+		8447DF5E308AFBA800B30B72 /* AttributedLabelDemoPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttributedLabelDemoPage.swift; sourceTree = "<group>"; };
 		92C4077E3E63FD214AE09FE8 /* Pods-ZLRichLabel_Tests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ZLRichLabel_Tests.release.xcconfig"; path = "Target Support Files/Pods-ZLRichLabel_Tests/Pods-ZLRichLabel_Tests.release.xcconfig"; sourceTree = "<group>"; };
 		949E416AAEDFF462F039DB77 /* Pods-ZLRichLabel_Example.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ZLRichLabel_Example.release.xcconfig"; path = "Target Support Files/Pods-ZLRichLabel_Example/Pods-ZLRichLabel_Example.release.xcconfig"; sourceTree = "<group>"; };
 		A1B2C3D4E5F6A7B8C9D0E1F2 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
@@ -563,6 +563,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 4B05CBC6B68B37FC1DA3A4A2 /* Pods-ZLRichLabel_Tests.debug.xcconfig */;
 			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Manual;
 				DEVELOPMENT_TEAM = "";
 				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = 6ZA44MJL83;
@@ -586,7 +587,6 @@
 				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "glcoalme-dev-all";
 				SWIFT_SWIFT3_OBJC_INFERENCE = Default;
 				SWIFT_VERSION = 5.0;
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ZLRichLabel_Example.app/ZLRichLabel_Example";
 			};
 			name = Debug;
@@ -595,6 +595,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 92C4077E3E63FD214AE09FE8 /* Pods-ZLRichLabel_Tests.release.xcconfig */;
 			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Manual;
 				DEVELOPMENT_TEAM = "";
 				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = 6ZA44MJL83;
@@ -614,7 +615,6 @@
 				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "glcoalme-dev-all";
 				SWIFT_SWIFT3_OBJC_INFERENCE = Default;
 				SWIFT_VERSION = 5.0;
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ZLRichLabel_Example.app/ZLRichLabel_Example";
 			};
 			name = Release;

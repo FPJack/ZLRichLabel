@@ -9,8 +9,9 @@
 //    默认 / 按下 / 失活（tintAdjustmentMode == .dimmed）样式，点击 / 长按回调，扩大点击热区
 //  - 尺寸计算（sizeThatFits / intrinsicContentSize，按宽度 + 行数缓存）、字符定位、文字范围的矩形
 //  - VoiceOver：每个链接单独作为可点击的无障碍元素
+//  - 字号自适应：`adjustsFontSizeToFitWidth` + `minimumScaleFactor`（单行按宽度，多行按行数与高度）
 //
-//  不支持：`adjustsFontSizeToFitWidth`、NSTextAttachment 绘制（ZLRichLabel 会把附件转换为 View）
+//  不支持：NSTextAttachment 绘制（ZLRichLabel 会把附件转换为 View）
 //
 
 import UIKit
@@ -172,6 +173,7 @@ open class ZLAttributedLabel: UILabel {
     }
 
     private func textDidChange() {
+        fontScaleCache = nil
         invalidateAccessibilityElements()
         invalidateIntrinsicContentSize()
         setNeedsLayout()
@@ -272,6 +274,132 @@ open class ZLAttributedLabel: UILabel {
     /// 文字阴影的模糊半径（配合 `shadowColor` / `shadowOffset`）
     open var shadowRadius: CGFloat = 0 {
         didSet { setNeedsDisplay() }
+    }
+
+    // MARK: 字号自适应
+
+    /// 为 true 时，文字在当前尺寸内放不下时等比缩小字体，最小缩放到 `minimumScaleFactor`（为 0 时不缩小，与 UILabel 相同）。
+    /// - 单行（`numberOfLines == 1`）：按宽度判断
+    /// - 多行：按行数（`numberOfLines > 0` 时）与 label 高度判断
+    ///
+    /// 只缩放字体（包括富文本中各段的字体和截断符），不缩放字间距、行距与内嵌 View；
+    /// `sizeThatFits` / `intrinsicContentSize` 仍按原字号计算（与 UILabel 相同），缩放按 label 的实际尺寸进行
+    open override var adjustsFontSizeToFitWidth: Bool {
+        didSet { fontScaleDidChange() }
+    }
+
+    /// 字号自适应时的最小缩放比例（0 ~ 1），默认 0 表示不缩小
+    open override var minimumScaleFactor: CGFloat {
+        didSet { fontScaleDidChange() }
+    }
+
+    /// 当前绘制使用的字体缩放比例，1 表示未缩小
+    open var currentFontScaleFactor: CGFloat {
+        return currentFontScale()
+    }
+
+    private struct FontScaleKey: Equatable {
+        let width: CGFloat
+        let height: CGFloat
+        let numberOfLines: Int
+        let minimum: CGFloat
+    }
+
+    /// 缩放比例缓存（文字变化时清空；按下链接只改变样式，不清空）
+    private var fontScaleCache: (key: FontScaleKey, scale: CGFloat)?
+    /// 缩小后的文字排版
+    private var scaledLayoutCache: (source: NSAttributedString, scale: CGFloat, layout: ZLTextLayout)?
+
+    private func fontScaleDidChange() {
+        fontScaleCache = nil
+        scaledLayoutCache = nil
+        invalidateAccessibilityElements()
+        setNeedsLayout()
+        setNeedsDisplay()
+    }
+
+    /// 当前尺寸下的字体缩放比例
+    func currentFontScale() -> CGFloat {
+        guard adjustsFontSizeToFitWidth, let text = storedText, text.length > 0 else { return 1 }
+        let minimum = minimumScaleFactor > 0 ? min(minimumScaleFactor, 1) : 1
+        guard minimum < 1 else { return 1 }
+        let insetBounds = bounds.inset(by: textInsets)
+        guard insetBounds.width > 0 else { return 1 }
+        let lines = numberOfLines
+        let key = FontScaleKey(width: insetBounds.width, height: insetBounds.height, numberOfLines: lines, minimum: minimum)
+        if let cache = fontScaleCache, cache.key == key { return cache.scale }
+
+        let fits: (CGFloat) -> Bool = { scale in
+            ZLAttributedLabel.text(ZLAttributedLabel.scaledText(text, scale: scale),
+                                   fitsWidth: key.width, height: key.height, lineLimit: lines)
+        }
+        var scale: CGFloat = 1
+        if !fits(1) {
+            if fits(minimum) {
+                // 二分查找能放下的最大比例
+                var low = minimum
+                var high: CGFloat = 1
+                for _ in 0..<10 {
+                    let mid = (low + high) / 2
+                    if fits(mid) { low = mid } else { high = mid }
+                }
+                scale = low
+            } else {
+                scale = minimum
+            }
+        }
+        fontScaleCache = (key, scale)
+        return scale
+    }
+
+    /// 文字是否能在给定尺寸内放下（单行按宽度；多行按行数与高度，高度 <= 0 时不限）
+    static func text(_ text: NSAttributedString, fitsWidth width: CGFloat, height: CGFloat, lineLimit: Int) -> Bool {
+        let maxValue: CGFloat = 100000
+        let framesetter = CTFramesetterCreateWithAttributedString(text as CFAttributedString)
+        if lineLimit == 1 {
+            let path = CGPath(rect: CGRect(x: 0, y: 0, width: maxValue, height: maxValue), transform: nil)
+            let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0), path, nil)
+            guard let line = (CTFrameGetLines(frame) as? [CTLine])?.first else { return true }
+            let lineWidth = CTLineGetTypographicBounds(line, nil, nil, nil) - CTLineGetTrailingWhitespaceWidth(line)
+            return CGFloat(lineWidth) <= width - 0.25   // 留一点余量：超出一点 CoreText 也会折行 / 截断
+        }
+        let path = CGPath(rect: CGRect(x: 0, y: 0, width: width, height: maxValue), transform: nil)
+        let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0), path, nil)
+        let lines = (CTFrameGetLines(frame) as? [CTLine]) ?? []
+        if lineLimit > 0, lines.count > lineLimit { return false }
+        guard height > 0 else { return true }
+        let size = CTFramesetterSuggestFrameSizeWithConstraints(
+            framesetter, CFRange(location: 0, length: text.length), nil, CGSize(width: width, height: maxValue), nil)
+        return ceil(size.height) <= height
+    }
+
+    /// 按比例缩小文字中的字体
+    static func scaledText(_ text: NSAttributedString, scale: CGFloat) -> NSAttributedString {
+        guard scale < 1, text.length > 0 else { return text }
+        let mutable = NSMutableAttributedString(attributedString: text)
+        text.enumerateAttribute(.font, in: NSRange(location: 0, length: text.length), options: []) { value, range, _ in
+            guard let font = value as? UIFont else { return }
+            mutable.addAttribute(.font, value: font.withSize(max(1, font.pointSize * scale)), range: range)
+        }
+        return mutable
+    }
+
+    /// 绘制 / 定位使用的文字：字号自适应缩小时为缩小后的副本（字符与下标不变）
+    func displayText(for text: NSAttributedString) -> NSAttributedString {
+        let scale = currentFontScale()
+        guard scale < 1 else { return text }
+        if let cache = scaledLayoutCache, cache.source === text, cache.scale == scale { return cache.layout.text }
+        return ZLAttributedLabel.scaledText(text, scale: scale)
+    }
+
+    /// 绘制 / 定位使用的排版（`sizeThatFits` 等尺寸计算仍使用原字号的 `textLayout(for:)`）
+    func displayLayout(for text: NSAttributedString) -> ZLTextLayout {
+        let scale = currentFontScale()
+        guard scale < 1 else { return textLayout(for: text) }
+        if let cache = scaledLayoutCache, cache.source === text, cache.scale == scale { return cache.layout }
+        let layout = ZLTextLayout(text: ZLAttributedLabel.scaledText(text, scale: scale))
+        scaledLayoutCache = (text, scale, layout)
+        return layout
     }
 
     // MARK: 链接
@@ -587,10 +715,10 @@ open class ZLAttributedLabel: UILabel {
 
     /// 按 textRect 排版得到的所有行与原点（缓存，内容或区域不变时直接返回）
     func frameLines(for text: NSAttributedString, in textRect: CGRect) -> ([CTLine], [CGPoint]) {
-        let layout = textLayout(for: text)
+        let layout = displayLayout(for: text)
         if layout.frameRect != textRect {
             let path = CGPath(rect: textRect, transform: nil)
-            let frame = CTFramesetterCreateFrame(layout.framesetter, CFRange(location: 0, length: text.length), path, nil)
+            let frame = CTFramesetterCreateFrame(layout.framesetter, CFRange(location: 0, length: layout.text.length), path, nil)
             let lines = (CTFrameGetLines(frame) as? [CTLine]) ?? []
             var origins = [CGPoint](repeating: .zero, count: lines.count)
             if !lines.isEmpty {
@@ -626,7 +754,9 @@ open class ZLAttributedLabel: UILabel {
 
     /// 计算基线修正用的字体（与绘制一致）
     var baselineFont: UIFont {
-        return font ?? UIFont.systemFont(ofSize: 17)
+        let base = font ?? UIFont.systemFont(ofSize: 17)
+        let scale = currentFontScale()
+        return scale < 1 ? base.withSize(max(1, base.pointSize * scale)) : base
     }
 
     open override func textRect(forBounds bounds: CGRect, limitedToNumberOfLines numberOfLines: Int) -> CGRect {
@@ -637,7 +767,7 @@ open class ZLAttributedLabel: UILabel {
         var textRect = insetBounds
         // 高度至少两行，避免约束过小时 CTFramesetterSuggestFrameSizeWithConstraints 返回 0
         textRect.size.height = max(baselineFont.lineHeight * CGFloat(max(2, numberOfLines)), insetBounds.height)
-        let layout = textLayout(for: text)
+        let layout = displayLayout(for: text)
         let key = ZLTextLayout.SizeKey(width: textRect.width, height: textRect.height, numberOfLines: -1)
         let textSize: CGSize
         if let cached = layout.suggestedSizes[key] {
@@ -780,6 +910,9 @@ open class ZLAttributedLabel: UILabel {
     /// 最后一行的截断：在行尾拼接截断符后按宽度截断（与绘制一致）
     func truncatedLine(for line: CTLine, in text: NSAttributedString, lineCount: Int,
                        width: Double) -> (line: CTLine, string: NSAttributedString)? {
+        // 字号自适应缩小时使用缩小后的文字（与 frameLines 返回的行一致）
+        let scale = currentFontScale()
+        let text = displayText(for: text)
         let lastRange = CTLineGetStringRange(line)
         guard !(lastRange.length == 0 && lastRange.location == 0),
               lastRange.location + lastRange.length < text.length else { return nil }
@@ -798,7 +931,7 @@ open class ZLAttributedLabel: UILabel {
             position += lastRange.length - 1
         }
 
-        let token = attributedTruncationToken
+        let token = attributedTruncationToken.map { ZLAttributedLabel.scaledText($0, scale: scale) }
             ?? NSAttributedString(string: "\u{2026}", attributes: text.attributes(at: max(0, position), effectiveRange: nil))
         let tokenLine = CTLineCreateWithAttributedString(token as CFAttributedString)
 
@@ -888,8 +1021,9 @@ open class ZLAttributedLabel: UILabel {
             (lines, origins) = frameLines(for: text, in: textRect)
         } else {
             // 临时样式（高亮 / 失活）：不替换排版缓存
-            let framesetter = CTFramesetterCreateWithAttributedString(text as CFAttributedString)
-            let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: text.length),
+            let scaled = ZLAttributedLabel.scaledText(text, scale: currentFontScale())
+            let framesetter = CTFramesetterCreateWithAttributedString(scaled as CFAttributedString)
+            let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: scaled.length),
                                                  CGPath(rect: textRect, transform: nil), nil)
             lines = (CTFrameGetLines(frame) as? [CTLine]) ?? []
             var buffer = [CGPoint](repeating: .zero, count: lines.count)
