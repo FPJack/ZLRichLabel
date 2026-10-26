@@ -114,6 +114,8 @@ final class HTagDemoPage: UIViewController {
         case29()
         // 首 / 中 / 尾自定义 View 跟随 label 尺寸
         case30()
+        // ZLTextStyle 链式配置
+        case31()
         stackView.addArrangedSubview(historyCard)
 
         refreshTapViews()
@@ -1232,6 +1234,47 @@ final class HTagDemoPage: UIViewController {
         lines.append(allOK ? "结论：所有 View 已跟随 label 尺寸更新" : "结论：有 View 位置未更新")
         status.text = lines.joined(separator: "\n")
     }
+
+// MARK: - ZLTextStyle 链式配置
+
+/// 31. ZLTextStyle 链式配置：style / tagStyles / 高亮 / 规则 ctx 中都可以直接链式书写，不需要写字典
+private func case31() {
+    let name = "31. ZLTextStyle 链式配置"
+    let source = "<title>链式配置样式</title> <new>NEW</new>\n"
+        + "正文 .systemFont(15).color(…).lineSpacing(6)，<b>加粗</b>、<i>斜体</i>、<u>下划线</u>、<s>删除线</s>、"
+        + "<grad>渐变文字</grad>、<shadow>阴影</shadow>、<k>字间距</k>，规则里 #话题# 胶囊和 `code` 行内代码。"
+    addCase(name, source: source) { v in
+        v.tagConfiguration = .anyTags
+        // 正文：链式起点直接写 .systemFont(...)
+        v.style = .systemFont(15).color(UIColor(white: 0, alpha: 0.87)).lineSpacing(6)
+        // 按标签名：字典的值也可以链式书写
+        v.tagStyles = [
+            "title": .boldFont(20).gradient(colors: [.mPink, .mOrange, .mDeepPurple]),
+            "new": .boldFont(11).color(.white).baselineOffset(3)
+                .background(ZLTextBackground(fillColor: .mDeepOrange, cornerRadius: 4)),
+            "b": .boldFont(15).color(.mBlue),
+            "i": .font(.italicSystemFont(ofSize: 15)),
+            "u": .underline(color: .mPink),
+            "s": .strikethrough().color(.mGrey),
+            "grad": .boldFont(15).gradient(colors: [.mBlue, .mGreen]),
+            "shadow": .color(.mIndigo).shadow(UIColor.black.withAlphaComponent(0.3),
+                                              offset: CGSize(width: 1, height: 1), blur: 2),
+            "k": .kern(4).color(.mTeal),
+            
+        ]
+        // 按下高亮（可选类型的属性也能直接写）
+        v.tagHighlightStyle = .backgroundColor(UIColor(white: 0, alpha: 0.08))
+        // 规则 handler 中：ctx.addAttributes / ctx.highlightStyle / ctx.setText(attributes:)
+        try? v.addRule(name: "topic", pattern: "#[^#\\s]+#") { [weak self] ctx in
+            ctx.addAttributes(.color(.mPurple).capsule(.mPurple))
+            ctx.highlightStyle = .background(ZLTextBackground(fillColor: UIColor.mPurple.withAlphaComponent(0.3)))
+            ctx.onTap = { [weak self] match in self?.onRuleTap(name, match, action: "点击话题") }
+        }
+        try? v.addRule(name: "code", pattern: "`([^`]+)`") { ctx in
+            ctx.setText(ctx.group(1) ?? "", attributes: .monospacedFont(13).color(.mDeepOrange).codeBackground())
+            }
+        }
+}
 
     // MARK: - 选中复制
 

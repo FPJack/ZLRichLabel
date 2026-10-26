@@ -2785,3 +2785,212 @@ class AttachmentFollowResizeTests: XCTestCase {
         assertViewsFollowText(label, views, "不限行数：全部重新显示")
     }
 }
+
+
+/// ZLTextStyle 的链式配置（Swift 扩展 + Objective-C 的 ZLTextStyleMaker）
+class TextStyleChainTests: XCTestCase {
+
+    func testStaticStartAndChainedValues() {
+        let shadowColor = UIColor.black
+        let style: ZLTextStyle = .font(.systemFont(ofSize: 15))
+            .color(.red)
+            .backgroundColor(.yellow)
+            .kern(1.5)
+            .baselineOffset(2)
+            .underline(.double, color: .blue)
+            .strikethrough()
+            .obliqueness(0.2)
+            .expansion(0.1)
+            .stroke(.green, width: -2)
+            .shadow(shadowColor, offset: CGSize(width: 1, height: 2), blur: 3)
+            .link("https://apple.com")
+
+        XCTAssertEqual(style[.font] as? UIFont, .systemFont(ofSize: 15))
+        XCTAssertEqual(style[.foregroundColor] as? UIColor, .red)
+        XCTAssertEqual(style[.backgroundColor] as? UIColor, .yellow)
+        XCTAssertEqual(style[.kern] as? CGFloat, 1.5)
+        XCTAssertEqual(style[.baselineOffset] as? CGFloat, 2)
+        XCTAssertEqual(style[.underlineStyle] as? Int, NSUnderlineStyle.double.rawValue)
+        XCTAssertEqual(style[.underlineColor] as? UIColor, .blue)
+        XCTAssertEqual(style[.strikethroughStyle] as? Int, NSUnderlineStyle.single.rawValue)
+        XCTAssertNil(style[.strikethroughColor], "不传颜色时不设置删除线颜色（与文字同色）")
+        XCTAssertEqual(style[.obliqueness] as? CGFloat, 0.2)
+        XCTAssertEqual(style[.expansion] as? CGFloat, 0.1)
+        XCTAssertEqual(style[.strokeColor] as? UIColor, .green)
+        XCTAssertEqual(style[.strokeWidth] as? CGFloat, -2)
+        let shadow = style[.shadow] as? NSShadow
+        XCTAssertEqual(shadow?.shadowOffset, CGSize(width: 1, height: 2))
+        XCTAssertEqual(shadow?.shadowBlurRadius, 3)
+        XCTAssertEqual(style[.link] as? String, "https://apple.com")
+    }
+
+    func testEveryStepReturnsNewStyle() {
+        let base: ZLTextStyle = .color(.red).lineSpacing(4)
+        let derived = base.color(.blue).alignment(.center)
+        XCTAssertEqual(base[.foregroundColor] as? UIColor, .red, "链式调用不修改原样式")
+        XCTAssertEqual((base[.paragraphStyle] as? NSParagraphStyle)?.alignment, .natural,
+                       "段落样式是复制后修改的，原来的段落样式不变")
+        XCTAssertEqual(derived[.foregroundColor] as? UIColor, .blue)
+        XCTAssertEqual((derived[.paragraphStyle] as? NSParagraphStyle)?.lineSpacing, 4)
+    }
+
+    func testParagraphPropertiesAccumulate() {
+        let existing = NSMutableParagraphStyle()
+        existing.headIndent = 7
+        let style = ZLTextStyle().set(.paragraphStyle, existing)
+            .lineSpacing(6)
+            .paragraphSpacing(8)
+            .paragraphSpacingBefore(2)
+            .alignment(.right)
+            .lineBreakMode(.byCharWrapping)
+            .firstLineHeadIndent(12)
+            .tailIndent(-5)
+            .lineHeightMultiple(1.2)
+            .writingDirection(.rightToLeft)
+            .lineHeight(22)
+        let p = style[.paragraphStyle] as? NSParagraphStyle
+        XCTAssertEqual(p?.headIndent, 7, "保留已有段落属性")
+        XCTAssertEqual(p?.lineSpacing, 6)
+        XCTAssertEqual(p?.paragraphSpacing, 8)
+        XCTAssertEqual(p?.paragraphSpacingBefore, 2)
+        XCTAssertEqual(p?.alignment, .right)
+        XCTAssertEqual(p?.lineBreakMode, .byCharWrapping)
+        XCTAssertEqual(p?.firstLineHeadIndent, 12)
+        XCTAssertEqual(p?.tailIndent, -5)
+        XCTAssertEqual(p?.lineHeightMultiple, 1.2)
+        XCTAssertEqual(p?.baseWritingDirection, .rightToLeft)
+        XCTAssertEqual(p?.minimumLineHeight, 22)
+        XCTAssertEqual(p?.maximumLineHeight, 22)
+        XCTAssertEqual(existing.lineSpacing, 0, "传入的段落样式对象不被修改")
+        XCTAssertFalse(p is NSMutableParagraphStyle, "存入的是不可变副本")
+    }
+
+    func testFontHelpers() {
+        let mono = ZLTextStyle.monospacedFont(13)[.font] as? UIFont
+        XCTAssertEqual(mono?.pointSize, 13)
+        XCTAssertTrue(mono?.fontDescriptor.symbolicTraits.contains(.traitMonoSpace) ?? false)
+
+        let bold = ZLTextStyle.systemFont(14).bold()[.font] as? UIFont
+        XCTAssertEqual(bold?.pointSize, 14, "加粗保留字号")
+        XCTAssertTrue(bold?.fontDescriptor.symbolicTraits.contains(.traitBold) ?? false)
+
+        let boldItalic = ZLTextStyle.boldFont(16).italic()[.font] as? UIFont
+        let traits = boldItalic?.fontDescriptor.symbolicTraits ?? []
+        XCTAssertTrue(traits.contains(.traitBold) && traits.contains(.traitItalic), "斜体保留已有的加粗")
+
+        let resized = ZLTextStyle.font(.monospacedSystemFont(ofSize: 10, weight: .bold)).fontSize(20)[.font] as? UIFont
+        XCTAssertEqual(resized?.pointSize, 20)
+        XCTAssertTrue(resized?.fontDescriptor.symbolicTraits.contains(.traitMonoSpace) ?? false, "只改字号，保留字体")
+
+        XCTAssertEqual((ZLTextStyle.fontSize(12)[.font] as? UIFont)?.pointSize, 12, "没有字体时用系统字体")
+        XCTAssertEqual((ZLTextStyle.systemFont(12, weight: .semibold)[.font] as? UIFont),
+                       .systemFont(ofSize: 12, weight: .semibold))
+    }
+
+    func testDecorationsAndGeneralHelpers() {
+        let capsule = ZLTextStyle.capsule(.purple)[.zlBackground] as? ZLTextBackground
+        XCTAssertNotNil(capsule?.fillColor)
+        XCTAssertLessThan(capsule?.cornerRadius ?? 0, 0, "胶囊两端半圆")
+        XCTAssertEqual((ZLTextStyle.codeBackground()[.zlBackground] as? ZLTextBackground)?.cornerRadius, 4)
+
+        let custom = ZLTextBackground(fillColor: .red, cornerRadius: 3)
+        XCTAssertTrue(ZLTextStyle.background(custom)[.zlBackground] as? ZLTextBackground === custom)
+
+        let horizontal = ZLTextStyle.gradient(colors: [.red, .blue])[.zlGradient] as? ZLTextGradient
+        XCTAssertEqual(horizontal?.startPoint, CGPoint(x: 0, y: 0.5))
+        let vertical = ZLTextStyle.gradient(colors: [.red, .blue], vertical: true)[.zlGradient] as? ZLTextGradient
+        XCTAssertEqual(vertical?.startPoint, CGPoint(x: 0.5, y: 0))
+        XCTAssertEqual(vertical?.endPoint, CGPoint(x: 0.5, y: 1))
+
+        let merged = ZLTextStyle.color(.red).kern(1).adding(.color(.blue).baselineOffset(3))
+        XCTAssertEqual(merged[.foregroundColor] as? UIColor, .blue, "adding 时后者覆盖")
+        XCTAssertEqual(merged[.kern] as? CGFloat, 1)
+        XCTAssertEqual(merged[.baselineOffset] as? CGFloat, 3)
+        XCTAssertEqual(merged.adding(nil).count, merged.count)
+
+        let removed = merged.removing(.kern, .baselineOffset)
+        XCTAssertNil(removed[.kern])
+        XCTAssertNil(removed[.baselineOffset])
+        XCTAssertNil(merged.set(.foregroundColor, nil)[.foregroundColor], "set nil 移除属性")
+    }
+
+    /// 所有接收 ZLTextStyle 的地方都能直接链式书写，渲染结果与字典写法一致
+    func testUsableEverywhereZLTextStyleIsAccepted() {
+        let label = ZLTagRichLabel(frame: CGRect(x: 0, y: 0, width: 300, height: 100))
+        label.update { v in
+            v.style = .systemFont(15).color(.darkGray).lineSpacing(4)
+            v.tagStyle = .color(.blue)
+            v.tagStyles = ["h1": .boldFont(18).underline()]
+            v.tagHighlightStyle = .backgroundColor(.lightGray)
+            v.highlightStyle = .color(.red)
+            try? v.addRule(name: "topic", pattern: "#\\w+#") { ctx in
+                ctx.addAttributes(.color(.purple).capsule(.purple))
+                ctx.highlightStyle = .capsule(.red)
+                ctx.onTap = { _ in }
+            }
+            try? v.addRule(name: "code", pattern: "`(\\w+)`") { ctx in
+                ctx.setText(ctx.group(1) ?? "", attributes: .monospacedFont(13).codeBackground())
+            }
+            v.text = "Hi <h1>Title</h1> <h2>tag</h2> #swift# `code`"
+        }
+        guard let attr = label.attributedText else { return XCTFail("没有渲染结果") }
+        let string = attr.string as NSString
+
+        func attrs(_ text: String) -> [NSAttributedString.Key: Any] {
+            attr.attributes(at: string.range(of: text).location, effectiveRange: nil)
+        }
+        XCTAssertEqual(attrs("Hi")[.foregroundColor] as? UIColor, .darkGray)
+        XCTAssertEqual((attrs("Hi")[.paragraphStyle] as? NSParagraphStyle)?.lineSpacing, 4)
+        XCTAssertEqual((attrs("Title")[.font] as? UIFont)?.pointSize, 18)
+        XCTAssertEqual(attrs("Title")[.underlineStyle] as? Int, NSUnderlineStyle.single.rawValue)
+        XCTAssertEqual(attrs("tag")[.foregroundColor] as? UIColor, .blue)
+        XCTAssertEqual(attrs("#swift#")[.foregroundColor] as? UIColor, .purple)
+        XCTAssertNotNil(attrs("#swift#")[.zlBackground] as? ZLTextBackground)
+        XCTAssertTrue((attrs("code")[.font] as? UIFont)?.fontDescriptor.symbolicTraits.contains(.traitMonoSpace) ?? false)
+
+        // 与字典字面量写法渲染出完全相同的富文本
+        let literal = ZLRichLabel(frame: label.bounds)
+        let chained = ZLRichLabel(frame: label.bounds)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 4
+        literal.update { v in
+            v.style = [.font: UIFont.systemFont(ofSize: 15), .foregroundColor: UIColor.darkGray, .paragraphStyle: paragraph]
+            v.text = "same text"
+        }
+        chained.update { v in
+            v.style = .systemFont(15).color(.darkGray).lineSpacing(4)
+            v.text = "same text"
+        }
+        XCTAssertEqual(literal.attributedText, chained.attributedText)
+    }
+
+    /// Objective-C 的 ZLTextStyleMaker（block 链式），在 Swift 中调用同一套实现
+    func testObjCMaker() {
+        let style = ZLTextStyleMaker.make
+            .font(.systemFont(ofSize: 15))
+            .color(.red)
+            .underline()
+            .lineSpacing(5)
+            .alignment(.center)
+            .capsule(.purple)
+            .systemFontWeight(16, .bold)
+            .style
+        XCTAssertEqual(style[.font] as? UIFont, .systemFont(ofSize: 16, weight: .bold), "后设置的字体覆盖")
+        XCTAssertEqual(style[.foregroundColor] as? UIColor, .red)
+        XCTAssertEqual(style[.underlineStyle] as? Int, NSUnderlineStyle.single.rawValue)
+        let p = style[.paragraphStyle] as? NSParagraphStyle
+        XCTAssertEqual(p?.lineSpacing, 5)
+        XCTAssertEqual(p?.alignment, .center)
+        XCTAssertNotNil(style[.zlBackground])
+
+        let base: ZLTextStyle = .color(.green).kern(2)
+        let extended = ZLTextStyleMaker.make(with: base).remove(.kern).verticalGradientColors([.red, .blue]).style
+        XCTAssertEqual(extended[.foregroundColor] as? UIColor, .green, "在已有样式基础上继续配置")
+        XCTAssertNil(extended[.kern])
+        XCTAssertEqual((extended[.zlGradient] as? ZLTextGradient)?.endPoint, CGPoint(x: 0.5, y: 1))
+        XCTAssertEqual(base[.kern] as? CGFloat, 2, "maker 不修改传入的样式")
+
+        let viaRuntime = (ZLTextStyleMaker.perform(NSSelectorFromString("make"))?.takeUnretainedValue() as? ZLTextStyleMaker)
+        XCTAssertNotNil(viaRuntime, "OC 可以通过 +make 获取")
+    }
+}

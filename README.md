@@ -41,6 +41,7 @@ Swift 与 Objective-C 均可使用，基于 CoreText 自行实现绘制，无第
 - `<h>` 标签：`<h>`、`<h1>`…`<hN>`，`</h1>` 和 `<h1/>` 两种闭合写法，不区分大小写；按标签名区分样式与点击；可替换为自定义 View
 - 通用标签：可识别任意标签名（`<b>`、`<a href="…">`、`<color value="#f00">`），解析标签属性，支持嵌套（内层继承外层样式、点击内层优先）和自闭合标签（`<br/>`、`<icon name="star"/>`）
 - 容错：开闭不匹配、未闭合的标签原样显示，不影响后面的标签
+- 样式链式配置：`label.style = .systemFont(15).color(.label).lineSpacing(4)`，所有接收 `ZLTextStyle` 的地方都能用；Objective-C 用 `ZLTextStyleMaker`
 - 胶囊背景（圆角背景 / 边框 / 内边距，适合 #话题#、`code`、标签徽章）与渐变文字，由 label 自己绘制，跨行时逐行绘制
 - 多行截断（自定义省略符）、Auto Layout 自适应高度
 - 展开 / 收起：截断时末尾显示可点击的「… 全文」，展开后显示「收起」
@@ -98,6 +99,7 @@ ZLRichLabel/Classes/
 ├── ZLAttributedLabel+Accessibility.swift  无障碍：每个链接单独可聚焦、可激活
 ├── ZLAttributedLabel+Attachment.swift     图片附件：NSTextAttachment 占位与绘制
 ├── ZLRichDefines.swift    样式类型 ZLTextStyle、内嵌 View 配置 ZLRichWidget
+├── ZLTextStyle+Chain.swift  ZLTextStyle 链式配置（Swift 扩展）与 ZLTextStyleMaker（Objective-C）
 ├── ZLRichRule.swift       ZLRichRule / ZLRichMatch / ZLRichRuleContext / ZLRichParser
 ├── ZLRichLabel.swift      基类：属性定义、规则解析、渲染与缓存、内嵌 View（附件）
 ├── ZLRichLabel+Layout.swift     布局：自适应高度、RTL 对齐、内嵌 View 的位置
@@ -582,6 +584,57 @@ label.attributedText = text
 
 `ZLRichLabel` 中规则 handler 插入的 `NSTextAttachment` 仍会转换成 `UIImageView`（以便点击整个命中、复用 View）；直接设置给 `ZLRichLabel.attributedText` 的富文本按上面的方式由基类绘制。
 
+## ZLTextStyle 链式配置
+
+`ZLTextStyle` 就是 `[NSAttributedString.Key: Any]`。库给它加了链式方法，**所有接收 `ZLTextStyle` 的地方**都可以直接链式书写，不用再拼字典：`style`、`highlightStyle`、`tagStyle`、`tagStyles`、`tagHighlightStyle(s)`、规则里的 `ctx.addAttributes(_:)`、`ctx.highlightStyle`、`ctx.setText(_:attributes:)`、`addLink(highlightStyle:)`，以及系统的 `NSAttributedString(string:attributes:)` 等。
+
+```swift
+// 以 .xxx 开头即可（类型推断为 ZLTextStyle），可选类型的属性也能直接写
+label.style = .systemFont(15).color(.label).lineSpacing(6)
+label.highlightStyle = .backgroundColor(UIColor(white: 0, alpha: 0.08))
+
+tagLabel.tagStyles = [
+    "h1": .boldFont(18).color(.systemBlue).underline(),
+    "new": .boldFont(11).color(.white).baselineOffset(3).background(ZLTextBackground(fillColor: .systemRed, cornerRadius: 4)),
+    "grad": .boldFont(15).gradient(colors: [.systemPink, .systemOrange]),
+]
+
+try? label.addRule(name: "topic", pattern: "#[^#\\s]+#") { ctx in
+    ctx.addAttributes(.color(.systemPurple).capsule(.systemPurple))
+    ctx.highlightStyle = .capsule(.systemRed)
+}
+try? label.addRule(name: "code", pattern: "`([^`]+)`") { ctx in
+    ctx.setText(ctx.group(1) ?? "", attributes: .monospacedFont(13).codeBackground())
+}
+
+// 在已有样式上继续配置；每一步都返回新的样式，原样式不变
+let title = label.style.boldFont(20).alignment(.center)
+let merged = base.adding(.color(.red)).removing(.kern)
+```
+
+| 分类 | 方法 |
+| --- | --- |
+| 字体 | `font(_:)`、`systemFont(_:weight:)`、`boldFont(_:)`、`monospacedFont(_:weight:)`、`fontSize(_:)`（只改字号）、`bold()` / `italic()`（在当前字体上加粗 / 斜体） |
+| 颜色与装饰 | `color(_:)`、`backgroundColor(_:)`、`underline(_:color:)`、`strikethrough(_:color:)`、`kern(_:)`、`baselineOffset(_:)`、`obliqueness(_:)`、`expansion(_:)`、`stroke(_:width:)`、`shadow(_:offset:blur:)`、`link(_:)` |
+| ZLRichLabel 装饰 | `background(_:)`（`ZLTextBackground`）、`capsule(_:)`、`codeBackground()`、`gradient(_:)`、`gradient(colors:vertical:)` |
+| 段落 | `lineSpacing`、`paragraphSpacing`、`paragraphSpacingBefore`、`alignment`、`lineBreakMode`、`firstLineHeadIndent`、`headIndent`、`tailIndent`、`lineHeightMultiple`、`lineHeight`（固定行高）、`writingDirection`、`paragraph { $0... }`（自定义） |
+| 通用 | `set(_:_:)`（任意属性，传 nil 移除）、`adding(_:)`（合并，后者覆盖）、`removing(_:...)` |
+
+- 段落方法在已有段落样式的**副本**上修改，多次调用会叠加（`lineSpacing(6).alignment(.center)` 两项都生效），不会改动传入的 `NSParagraphStyle`。
+- `bold()` / `italic()` / `fontSize(_:)` 基于当前字体（没有字体时为 17pt 系统字体）。
+
+**Objective-C：`ZLTextStyleMaker`**（block 链式，最后用 `.style` 取出字典）
+
+```objc
+label.style = ZLTextStyleMaker.make.systemFont(15).color(UIColor.labelColor).lineSpacing(6).style;
+label.tagStyles = @{@"h1": ZLTextStyleMaker.make.boldFont(18).color(UIColor.systemBlueColor).underline().style};
+[ctx addAttributes:ZLTextStyleMaker.make.color(kPurple).capsule(kPurple).style];
+// 在已有样式上继续
+label.style = [ZLTextStyleMaker makeWithStyle:label.style].kern(1).style;
+```
+
+OC 中带多个参数或可选参数的方法名不同：`systemFontWeight(size, weight)`、`underlineStyle(style, color)`、`strikethroughStyle(style, color)`、`shadow(color, offset, blur)`、`gradientColors(colors)` / `verticalGradientColors(colors)`、`remove(key)`；无参数的方法需要写 `()`，如 `underline()`、`bold()`、`codeBackground()`。
+
 ## 通用配置
 
 | API | 说明 |
@@ -946,6 +999,7 @@ label.numberOfLines = 0;
 | Swift | Objective-C |
 | --- | --- |
 | `label.update { v in }` | `ZLTagRichLabel`：`[label updateTag:^(ZLTagRichLabel *v) {}]`；`ZLRichLabel`：`[label update:^(ZLRichLabel *v) {}]`（或 `beginUpdates` / `endUpdates`） |
+| `label.style = .systemFont(15).color(.red)` | `label.style = ZLTextStyleMaker.make.systemFont(15).color(UIColor.redColor).style;` |
 | `tagTapHandlers = [...]` | `setTapHandler:forTag:` / `removeTapHandlerForTag:` |
 | `addRule(name:pattern:options:priority:handler:)` | `addRuleWithName:pattern:options:priority:error:handler:` |
 | `removeRule(named:)` | `removeRuleNamed:` |
@@ -1029,6 +1083,7 @@ Example 工程通过 Swift Package Manager 引用仓库根目录的本地包（`
 | 28b | RTL / 双向混排的胶囊：阿拉伯语、希伯来语 #话题#，紧挨着的两个 RTL 胶囊，阿拉伯语中的英文胶囊、英文中的阿拉伯胶囊（两侧内边距一致，可点击） |
 | 29 | 内边距 `textInsets`：圆角背景的 label 切换 0 / 8 / 12·16 / 24 内边距，文字重新折行；链接、内嵌标签、展开 / 收起都在内边距以内 |
 | 30 | 首 / 中 / 尾自定义 View 跟随 label 尺寸：开头头像、中间按钮和徽章、结尾箭头；拖动滑块改 label 宽度、切换对齐 / 行数 / 内边距、宽度动画，点「关注」改按钮尺寸，下方实时比较每个 View 与文字占位符的位置 |
+| 31 | `ZLTextStyle` 链式配置：正文、按标签名样式（加粗 / 斜体 / 下划线 / 删除线 / 渐变 / 阴影 / 字间距 / 徽章）、按下高亮、规则中的胶囊和行内代码都用链式写法；OC 版用 `ZLTextStyleMaker` |
 
 页面顶部会显示最近一次点击得到的完整信息，底部有点击历史。
 

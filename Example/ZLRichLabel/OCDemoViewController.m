@@ -628,6 +628,8 @@ static NSString *OCQuote(NSString *s) {
     [self case28b];
     // 首 / 中 / 尾自定义 View 跟随 label 尺寸
     [self case30];
+    // ZLTextStyle 链式配置（ZLTextStyleMaker）
+    [self case31];
     [self.stackView addArrangedSubview:self.historyCard];
 
     [self refreshTapViews];
@@ -2157,6 +2159,50 @@ static NSString *OCQuote(NSString *s) {
     }
     [lines addObject:allOK ? @"结论：所有 View 已跟随 label 尺寸更新" : @"结论：有 View 位置未更新"];
     status.text = [lines componentsJoinedByString:@"\n"];
+}
+
+#pragma mark - ZLTextStyle 链式配置
+
+/// 31. ZLTextStyleMaker：Objective-C 中用 block 链式配置样式，`.style` 取出字典，
+/// 可用于 style / tagStyles / tagHighlightStyle / ctx addAttributes: / ctx.highlightStyle / ctx setText:attributes:
+- (void)case31 {
+    NSString *name = @"31. ZLTextStyle 链式配置（ZLTextStyleMaker）";
+    NSString *source = @"<title>链式配置样式</title> <new>NEW</new>\n"
+        @"正文 .systemFont(15).color(…).lineSpacing(6)，<b>加粗</b>、<i>斜体</i>、<u>下划线</u>、<s>删除线</s>、"
+        @"<grad>渐变文字</grad>、<shadow>阴影</shadow>、<k>字间距</k>，规则里 #话题# 胶囊和 `code` 行内代码。";
+
+    __weak typeof(self) weakSelf = self;
+    [self addCase:name source:source configure:^(ZLTagRichLabel *v) {
+        v.tagNamePattern = ZLTagParser.anyTagNamePattern;
+        v.allowsNestedTags = YES;
+        v.style = ZLTextStyleMaker.make.systemFont(15).color([UIColor colorWithWhite:0 alpha:0.87]).lineSpacing(6).style;
+        v.tagStyles = @{
+            @"title": ZLTextStyleMaker.make.boldFont(20).gradientColors(@[kPink, kOrange, kDeepPurple]).style,
+            @"new": ZLTextStyleMaker.make.boldFont(11).color(UIColor.whiteColor).baselineOffset(3)
+                        .background([ZLTextBackground backgroundWithFillColor:kDeepOrange strokeColor:nil cornerRadius:4]).style,
+            @"b": ZLTextStyleMaker.make.boldFont(15).color(kBlue).style,
+            @"i": ZLTextStyleMaker.make.font([UIFont italicSystemFontOfSize:15]).style,
+            @"u": ZLTextStyleMaker.make.underlineStyle(NSUnderlineStyleSingle, kPink).style,
+            @"s": ZLTextStyleMaker.make.strikethrough().color(kGrey).style,
+            @"grad": ZLTextStyleMaker.make.boldFont(15).gradientColors(@[kBlue, kGreen]).style,
+            @"shadow": ZLTextStyleMaker.make.color(kIndigo).shadow([UIColor colorWithWhite:0 alpha:0.3], CGSizeMake(1, 1), 2).style,
+            @"k": ZLTextStyleMaker.make.kern(4).color(kTeal).style,
+        };
+        v.tagHighlightStyle = ZLTextStyleMaker.make.backgroundColor([UIColor colorWithWhite:0 alpha:0.08]).style;
+        [v addRuleWithName:@"topic" pattern:@"#[^#\\s]+#" options:0 priority:0 error:nil
+                   handler:^(ZLRichRuleContext *ctx) {
+            [ctx addAttributes:ZLTextStyleMaker.make.color(kPurple).capsule(kPurple).style];
+            ctx.highlightStyle = ZLTextStyleMaker.make
+                .background([ZLTextBackground backgroundWithFillColor:[kPurple colorWithAlphaComponent:0.3]
+                                                          strokeColor:nil cornerRadius:-1]).style;
+            ctx.onTap = [weakSelf ruleTapForCase:name action:@"点击话题"];
+        }];
+        [v addRuleWithName:@"code" pattern:@"`([^`]+)`" options:0 priority:0 error:nil
+                   handler:^(ZLRichRuleContext *ctx) {
+            [ctx setText:[ctx groupAtIndex:1] ?: @""
+              attributes:ZLTextStyleMaker.make.monospacedFont(13).color(kDeepOrange).codeBackground().style];
+        }];
+    }];
 }
 
 @end
