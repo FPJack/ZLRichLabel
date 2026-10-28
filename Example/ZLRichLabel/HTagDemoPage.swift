@@ -35,6 +35,10 @@ final class HTagDemoPage: UIViewController {
     private let tapInfoPanel = TapInfoPanel()
     private let scrollView = UIScrollView()
     private let stackView = UIStackView()
+    private let tableView = UITableView(frame: .zero, style: .plain)
+    /// 两种容器使用相同的卡片，保留其交互状态；单元格可复用。
+    @objc var isTableDemo = false
+    private var tableCards: [UIView] = []
     private let historyCard = HistoryCard()
     /// 每个用例的卡片（用于显示 onParsed 结果）
     private var cards: [String: DemoCard] = [:]
@@ -66,7 +70,7 @@ final class HTagDemoPage: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "HTagRichText Demo"
+        title = isTableDemo ? "TableView Demo" : "HTagRichText Demo"
         view.backgroundColor = UIColor(hex: 0xFEF7FF)
         setupNavigationBar()
         setupLayout()
@@ -117,6 +121,14 @@ final class HTagDemoPage: UIViewController {
         // ZLTextStyle 链式配置
         case31()
         stackView.addArrangedSubview(historyCard)
+        if isTableDemo {
+            tableCards = stackView.arrangedSubviews
+            for card in tableCards {
+                stackView.removeArrangedSubview(card)
+                card.removeFromSuperview()
+            }
+            tableView.reloadData()
+        }
 
         refreshTapViews()
     }
@@ -131,12 +143,23 @@ final class HTagDemoPage: UIViewController {
 
         let clear = UIBarButtonItem(barButtonSystemItem: .trash, target: self, action: #selector(clearHistory))
         clear.accessibilityLabel = "清空点击记录"
+        if isTableDemo {
+            navigationItem.rightBarButtonItem = clear
+            return
+        }
         let swiftUI = UIBarButtonItem(title: "SwiftUI", style: .plain, target: self, action: #selector(openSwiftUIDemo))
         let base = UIBarButtonItem(title: "Base", style: .plain, target: self, action: #selector(openAttributedLabelDemo))
         base.accessibilityLabel = "ZLAttributedLabel 示例"
         navigationItem.rightBarButtonItems = [clear, swiftUI, base]
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "OC", style: .plain,
-                                                           target: self, action: #selector(openOCDemo))
+        let oc = UIBarButtonItem(title: "OC", style: .plain, target: self, action: #selector(openOCDemo))
+        let compare = UIBarButtonItem(title: "TableView", style: .plain, target: self, action: #selector(openTableDemo))
+        navigationItem.leftBarButtonItems = [oc, compare]
+    }
+
+    @objc private func openTableDemo() {
+        let page = HTagDemoPage()
+        page.isTableDemo = true
+        navigationController?.pushViewController(page, animated: true)
     }
 
     /// 底层 ZLAttributedLabel 示例页（AttributedLabelDemoPage.swift）：富文本绘制、链接、内边距、截断等
@@ -165,12 +188,33 @@ final class HTagDemoPage: UIViewController {
         stackView.spacing = 12
         stackView.alignment = .fill
 
-        [tapInfoPanel, divider, scrollView].forEach {
+        let contentView: UIScrollView = isTableDemo ? tableView : scrollView
+        contentView.accessibilityIdentifier = isTableDemo ? "richDemoTable" : "richDemoScroll"
+        if isTableDemo {
+            tableView.dataSource = self
+            tableView.separatorStyle = .none
+            tableView.backgroundColor = .clear
+            tableView.rowHeight = UITableView.automaticDimension
+            tableView.estimatedRowHeight = 250
+            tableView.register(HTagDemoTableCell.self, forCellReuseIdentifier: "RichDemoCard")
+            if #available(iOS 16.0, *) {
+                tableView.selfSizingInvalidation = .enabledIncludingConstraints
+            }
+        }
+        [tapInfoPanel, divider, contentView].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview($0)
         }
-        stackView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.addSubview(stackView)
+        if !isTableDemo {
+            stackView.translatesAutoresizingMaskIntoConstraints = false
+            scrollView.addSubview(stackView)
+            NSLayoutConstraint.activate([
+                stackView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 12),
+                stackView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -12),
+                stackView.leadingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.leadingAnchor, constant: 12),
+                stackView.trailingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.trailingAnchor, constant: -12),
+            ])
+        }
 
         let safe = view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
@@ -183,15 +227,10 @@ final class HTagDemoPage: UIViewController {
             divider.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             divider.heightAnchor.constraint(equalToConstant: 1),
 
-            scrollView.topAnchor.constraint(equalTo: divider.bottomAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-
-            stackView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 12),
-            stackView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -12),
-            stackView.leadingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.leadingAnchor, constant: 12),
-            stackView.trailingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.trailingAnchor, constant: -12),
+            contentView.topAnchor.constraint(equalTo: divider.bottomAnchor),
+            contentView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            contentView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
     }
 
@@ -1987,6 +2026,54 @@ private final class PaddingLabel: UILabel {
         let size = super.intrinsicContentSize
         return CGSize(width: ceil(size.width + insets.left + insets.right),
                       height: ceil(size.height + insets.top + insets.bottom))
+    }
+}
+
+// MARK: - UITableView 对比页
+
+extension HTagDemoPage: UITableViewDataSource {
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return tableCards.count
+    }
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "RichDemoCard", for: indexPath) as! HTagDemoTableCell
+        cell.show(tableCards[indexPath.row])
+        return cell
+    }
+}
+
+private final class HTagDemoTableCell: UITableViewCell {
+    private weak var hostedCard: UIView?
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        selectionStyle = .none
+        backgroundColor = .clear
+        contentView.backgroundColor = .clear
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        if hostedCard?.superview === contentView { hostedCard?.removeFromSuperview() }
+        hostedCard = nil
+    }
+
+    func show(_ card: UIView) {
+        guard hostedCard !== card || card.superview !== contentView else { return }
+        if hostedCard?.superview === contentView { hostedCard?.removeFromSuperview() }
+        card.removeFromSuperview()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(card)
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
+            card.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            card.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            card.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6)
+        ])
+        hostedCard = card
     }
 }
 

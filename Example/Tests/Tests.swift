@@ -3132,3 +3132,97 @@ class TallAttachmentLineTests: XCTestCase {
         XCTAssertLessThanOrEqual(view.frame.maxY, label.bounds.height + 0.5, "View 底部超出 label：\(view.frame) label \(label.bounds)")
     }
 }
+
+final class HTagTableComparisonTests: XCTestCase {
+    private func labels(in view: UIView) -> [UILabel] {
+        return (view as? UILabel).map { [$0] } ?? view.subviews.flatMap { labels(in: $0) }
+    }
+
+    func testTableUsesSameDemoCardsAndReusableCells() throws {
+        let type = try XCTUnwrap(NSClassFromString("ZLRichLabel_Example.HTagDemoPage") as? UIViewController.Type)
+        let original = type.init()
+        original.loadViewIfNeeded()
+        original.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        original.view.layoutIfNeeded()
+        let scroll = try XCTUnwrap(original.view.subviews.compactMap { $0 as? UIScrollView }
+            .first { $0.accessibilityIdentifier == "richDemoScroll" })
+        let stack = try XCTUnwrap(scroll.subviews.compactMap { $0 as? UIStackView }.first)
+
+        let comparison = type.init()
+        comparison.setValue(true, forKey: "isTableDemo")
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = comparison
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        window.layoutIfNeeded()
+        let table = try XCTUnwrap(comparison.view.subviews.compactMap { $0 as? UITableView }
+            .first { $0.accessibilityIdentifier == "richDemoTable" })
+        let source = try XCTUnwrap(table.dataSource)
+        let count = source.tableView(table, numberOfRowsInSection: 0)
+        XCTAssertEqual(count, stack.arrangedSubviews.count)
+        XCTAssertGreaterThan(count, 30)
+
+        for row in 0..<count {
+            let cell = source.tableView(table, cellForRowAt: IndexPath(row: row, section: 0))
+            XCTAssertEqual(cell.reuseIdentifier, "RichDemoCard")
+            let card = try XCTUnwrap(cell.contentView.subviews.first)
+            XCTAssertEqual(labels(in: card).first?.text, labels(in: stack.arrangedSubviews[row]).first?.text,
+                           "卡片顺序不一致：\(row)")
+        }
+        XCTAssertEqual(table.rowHeight, UITableView.automaticDimension)
+    }
+
+    func testCardSurvivesCellReuse() throws {
+        let type = try XCTUnwrap(NSClassFromString("ZLRichLabel_Example.HTagDemoPage") as? UIViewController.Type)
+        let controller = type.init()
+        controller.setValue(true, forKey: "isTableDemo")
+        controller.loadViewIfNeeded()
+        let table = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? UITableView }.first)
+        let source = try XCTUnwrap(table.dataSource)
+        let path = IndexPath(row: 0, section: 0)
+        let cell = source.tableView(table, cellForRowAt: path)
+        let card = try XCTUnwrap(cell.contentView.subviews.first)
+        cell.prepareForReuse()
+        XCTAssertNil(card.superview)
+        let next = source.tableView(table, cellForRowAt: path)
+        XCTAssertTrue(next.contentView.subviews.contains { $0 === card }, "复用后应保留卡片及其状态")
+        let replacement = source.tableView(table, cellForRowAt: path)
+        next.prepareForReuse()
+        XCTAssertTrue(replacement.contentView.subviews.contains { $0 === card }, "旧单元格不能移除已经转移的卡片")
+    }
+
+    func testExpandedCardUpdatesItsRowHeight() throws {
+        let type = try XCTUnwrap(NSClassFromString("ZLRichLabel_Example.HTagDemoPage") as? UIViewController.Type)
+        let controller = type.init()
+        controller.setValue(true, forKey: "isTableDemo")
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        window.layoutIfNeeded()
+        let table = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? UITableView }.first)
+        var target: (IndexPath, ZLTagRichLabel)?
+        func tagLabels(_ view: UIView) -> [ZLTagRichLabel] {
+            return (view as? ZLTagRichLabel).map { [$0] } ?? view.subviews.flatMap { tagLabels($0) }
+        }
+        for row in 0..<table.numberOfRows(inSection: 0) {
+            let indexPath = IndexPath(row: row, section: 0)
+            table.scrollToRow(at: indexPath, at: .middle, animated: false)
+            window.layoutIfNeeded()
+            guard let cell = table.cellForRow(at: indexPath),
+                  labels(in: cell).contains(where: { $0.text?.hasPrefix("24. 展开 / 收起（收起时") == true }),
+                  let label = tagLabels(cell).first else { continue }
+            target = (indexPath, label)
+            break
+        }
+        let (indexPath, label) = try XCTUnwrap(target)
+        let before = table.rectForRow(at: indexPath).height
+        label.isExpanded = true
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        window.layoutIfNeeded()
+        let after = table.rectForRow(at: indexPath).height
+        XCTAssertGreaterThan(after, before, "展开内容后 TableView 行高应自动增加")
+    }
+
+}
+
