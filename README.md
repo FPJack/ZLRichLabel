@@ -40,6 +40,7 @@ Swift 与 Objective-C 均可使用，基于 CoreText 自行实现绘制，无第
 - 点击与按下高亮：整段可点击（包括其中的图片 / View），可按规则 / 标签名设置不同的高亮样式
 - `<h>` 标签：`<h>`、`<h1>`…`<hN>`，`</h1>` 和 `<h1/>` 两种闭合写法，不区分大小写；按标签名区分样式与点击；可替换为自定义 View
 - 通用标签：可识别任意标签名（`<b>`、`<a href="…">`、`<color value="#f00">`），解析标签属性，支持嵌套（内层继承外层样式、点击内层优先）和自闭合标签（`<br/>`、`<icon name="star"/>`）
+- 自定义标签符号：`<` `>` 可换成 `[` `]`、`【` `】`、`{` `}`、`{{` `}}` 等（`tagOpenDelimiter` / `tagCloseDelimiter`）
 - 容错：开闭不匹配、未闭合的标签原样显示，不影响后面的标签
 - 样式链式配置：`label.style = .systemFont(15).color(.label).lineSpacing(4)`，所有接收 `ZLTextStyle` 的地方都能用；Objective-C 用 `ZLTextStyleMaker`
 - 胶囊背景（圆角背景 / 边框 / 内边距，适合 #话题#、`code`、标签徽章）与渐变文字，由 label 自己绘制，跨行时逐行绘制
@@ -108,6 +109,7 @@ ZLRichLabel/Classes/
 ├── ZLRichLabel+Selection.swift  选中复制：选中范围、拖柄、菜单、展示文字与原文的对应
 ├── ZLRichLabel+Decoration.swift 胶囊背景 / 渐变文字的属性与绘制
 ├── ZLRichText.swift      SwiftUI 封装（UIViewRepresentable），高度自适应
+├── ZLBracketLabel.swift   ZLTagRichLabel 子类：标签默认用 [ ] 包裹
 ├── ZLTagParser.swift      标签解析：通用标签（任意标签名、属性、嵌套、自闭合、容错）与 <h> 标签
 └── ZLTagRichLabel.swift   标签子类、ZLTagInfo、ZLTagSegment
 ```
@@ -457,6 +459,35 @@ label.text = "<b>粗体里 <color value=\"#2196F3\">蓝色 <a href=\"https://git
 ```swift
 ZLTagParser.tags(in: source, configuration: .anyTags)   // [ZLTagInfo]，外层在前
 ```
+
+### 自定义标签符号
+
+默认用 `<` `>` 包裹标签名。可以用 `tagOpenDelimiter` / `tagCloseDelimiter` 换成其他符号，**其他规则完全不变**：闭合写法（`[/h1]`、`[h1/]`）、标签名匹配、属性、嵌套、自闭合和容错都和 `<` `>` 一样。
+
+```swift
+label.tagOpenDelimiter = "["      // [h1]用户协议[/h1]
+label.tagCloseDelimiter = "]"
+// 【h1】用户协议【/h1】   → "【" / "】"
+// {h1}用户协议{/h1}       → "{" / "}"
+// {{b}}粗体{{/b}}         → "{{" / "}}"（支持多个字符）
+```
+
+```objc
+label.tagOpenDelimiter = @"【";
+label.tagCloseDelimiter = @"】";
+```
+
+- 默认值是 `<` / `>`；设为空字符串时也按 `<` / `>` 处理。
+- 换了符号后，原来的 `<h1>…</h1>` 不再被识别，原样显示。
+- 属性名和不带引号的属性值里不能出现开始 / 结束符号的字符，需要时用引号包起来：`[a href="x[1]"]`。
+- 固定用 `[` `]` 时可以直接用子类 `ZLBracketLabel`（继承 `ZLTagRichLabel`，创建后默认就是 `[` `]`，其他用法完全一样，也可以再改成别的符号）：
+
+  ```swift
+  let label = ZLBracketLabel(frame: .zero)
+  label.tagStyles = ["h1": .color(.systemBlue).underline()]
+  label.text = "同意 [h1]用户协议[/h1] 和 [h2]隐私政策[/h2]"
+  ```
+- 等同于修改 `tagConfiguration.openDelimiter` / `closeDelimiter`；单独解析时可传 `ZLTagParserConfiguration(openDelimiter: "[", closeDelimiter: "]")`，OC 用 `[ZLTagParser tagsInString:namePattern:allowsNesting:allowsSelfClosing:openDelimiter:closeDelimiter:]`。
 
 ### 其他
 
@@ -1018,7 +1049,8 @@ label.numberOfLines = 0;
 | `onCopy = { text, isRaw in }` | `onCopy = ^(NSString *text, BOOL isRaw) {}` |
 | `tagConfiguration = .anyTags` | `tagNamePattern = ZLTagParser.anyTagNamePattern; allowsNestedTags = YES; allowsSelfClosingTags = YES;` |
 | `info.attribute("href")` / `info.colorAttribute("value")` | `[info attributeNamed:@"href"]` / `[info colorAttributeNamed:@"value"]` |
-| `ZLTagParser.tags(in:configuration:)` | `[ZLTagParser tagsInString:namePattern:allowsNesting:allowsSelfClosing:]` |
+| `ZLTagParser.tags(in:configuration:)` | `[ZLTagParser tagsInString:namePattern:allowsNesting:allowsSelfClosing:]`（自定义符号再加 `openDelimiter:closeDelimiter:`） |
+| `tagOpenDelimiter = "["` / `tagCloseDelimiter = "]"` | `tagOpenDelimiter = @"["` / `tagCloseDelimiter = @"]"` |
 | `.zlBackground` / `.zlGradient` | `ZLRichLabel.textBackgroundAttributeName` / `ZLRichLabel.textGradientAttributeName` |
 | `ZLTextBackground(fillColor:strokeColor:cornerRadius:)` | `[ZLTextBackground backgroundWithFillColor:strokeColor:cornerRadius:]` |
 | `ZLTextGradient(colors:)` | `[ZLTextGradient gradientWithColors:]` |
@@ -1084,6 +1116,8 @@ Example 工程通过 Swift Package Manager 引用仓库根目录的本地包（`
 | 29 | 内边距 `textInsets`：圆角背景的 label 切换 0 / 8 / 12·16 / 24 内边距，文字重新折行；链接、内嵌标签、展开 / 收起都在内边距以内 |
 | 30 | 首 / 中 / 尾自定义 View 跟随 label 尺寸：开头头像、中间按钮和徽章、结尾箭头；拖动滑块改 label 宽度、切换对齐 / 行数 / 内边距、宽度动画，点「关注」改按钮尺寸，下方实时比较每个 View 与文字占位符的位置 |
 | 31 | `ZLTextStyle` 链式配置：正文、按标签名样式（加粗 / 斜体 / 下划线 / 删除线 / 渐变 / 阴影 / 字间距 / 徽章）、按下高亮、规则中的胶囊和行内代码都用链式写法；OC 版用 `ZLTextStyleMaker` |
+| 32a–32d | 自定义标签符号：`[h1]…[/h1]`、`【h1】…【/h1】`、`{h1}…{/h1}`，以及多字符 `{{b}}…{{/b}}` 加属性和嵌套；闭合写法、容错与 `<` `>` 一致，换符号后 `<h1>` 原样显示 |
+| 33 | 子类 `ZLBracketLabel`：默认用 `[h1]…[/h1]` 表示标签，样式、点击、按下高亮与 `ZLTagRichLabel` 一致 |
 
 页面顶部会显示最近一次点击得到的完整信息，底部有点击历史。
 

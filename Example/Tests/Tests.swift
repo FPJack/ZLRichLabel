@@ -3226,3 +3226,146 @@ final class HTagTableComparisonTests: XCTestCase {
 
 }
 
+
+// MARK: - 自定义标签符号
+
+class TagDelimiterTests: XCTestCase {
+
+    private func describe(_ tags: [ZLTagInfo]) -> [String] {
+        return tags.map { "\($0.name):\($0.text):\($0.depth)" }
+    }
+
+    private func config(_ open: String, _ close: String, any: Bool = false) -> ZLTagParserConfiguration {
+        var c: ZLTagParserConfiguration = any ? .anyTags : .hTags
+        c.openDelimiter = open
+        c.closeDelimiter = close
+        return c
+    }
+
+    func testDefaultDelimitersUnchanged() {
+        XCTAssertEqual(ZLTagParserConfiguration.hTags.openDelimiter, "<")
+        XCTAssertEqual(ZLTagParserConfiguration.hTags.closeDelimiter, ">")
+        // 空字符串按默认符号处理
+        XCTAssertEqual(describe(ZLTagParser.tags(in: "<h1>a</h1>", configuration: config("", ""))), ["h1:a:0"])
+    }
+
+    func testCustomDelimitersSameRulesAsAngleBrackets() {
+        let pairs: [(String, String)] = [("[", "]"), ("【", "】"), ("{", "}"), ("{{", "}}"), ("((", "))")]
+        // 以 `<` `>` 的写法为基准，替换符号后结果应一致
+        let template = "agree <h1>User</h1>, <h2>Privacy<h2/> <h>x</h1> <h3>a</h3> <h1>a<h2>b</h2></h1> <hx>y</hx>"
+        let expected = describe(ZLTagParser.tags(in: template))
+        XCTAssertEqual(expected, ["h1:User:0", "h2:Privacy:0", "h3:a:0", "h2:b:0"])
+        for (open, close) in pairs {
+            let source = template.replacingOccurrences(of: "<", with: open).replacingOccurrences(of: ">", with: close)
+            let tags = ZLTagParser.tags(in: source, configuration: config(open, close))
+            XCTAssertEqual(describe(tags), expected, "\(open)\(close)")
+            XCTAssertEqual(tags.first?.raw, "\(open)h1\(close)User\(open)/h1\(close)")
+            // 自定义符号后，原来的 `<h1>` 不再被识别
+            XCTAssertEqual(describe(ZLTagParser.tags(in: "<h1>a</h1>", configuration: config(open, close))), [])
+        }
+    }
+
+    func testCustomDelimitersWithAttributesNestingAndSelfClosing() {
+        let source = "[b]粗 [color value=\"#f00\"]红[/color] [a href='https://x.com?a=1' target=_blank]链接[/a][/b][br/]"
+        let tags = ZLTagParser.tags(in: source, configuration: config("[", "]", any: true))
+        XCTAssertEqual(describe(tags), ["b:粗 红 链接:0", "color:红:1", "a:链接:1", "br::0"])
+        XCTAssertEqual(tags[2].attributes, ["href": "https://x.com?a=1", "target": "_blank"])
+        XCTAssertEqual(tags[1].colorAttribute("value"), UIColor(red: 1, green: 0, blue: 0, alpha: 1))
+        // 无引号属性值遇到结束符号即停止
+        let t = ZLTagParser.tags(in: "【color value=red】x【/color】", configuration: config("【", "】", any: true))
+        XCTAssertEqual(t.first?.attributes, ["value": "red"])
+        XCTAssertEqual(t.first?.text, "x")
+    }
+
+    func testOCEntry() {
+        let tags = ZLTagParser.tags(in: "{h1}a{/h1}", namePattern: "h\\d*", allowsNesting: false,
+                                    allowsSelfClosing: false, openDelimiter: "{", closeDelimiter: "}")
+        XCTAssertEqual(describe(tags), ["h1:a:0"])
+    }
+
+    func testLabelUsesCustomDelimiters() {
+        let label = ZLTagRichLabel(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        var tapped: [String] = []
+        label.update { v in
+            v.tagOpenDelimiter = "【"
+            v.tagCloseDelimiter = "】"
+            v.tagStyles = ["h1": [.foregroundColor: UIColor.systemBlue]]
+            v.onTagTap = { tapped.append("\($0.name):\($0.text)") }
+            v.text = "同意【h1】用户协议【/h1】和<h2>隐私</h2>"
+        }
+        XCTAssertEqual(label.tagConfiguration.openDelimiter, "【")
+        let display = label.attributedText!.string as NSString
+        XCTAssertEqual(display as String, "同意用户协议和<h2>隐私</h2>")
+        XCTAssertEqual(label.tags.map { $0.name }, ["h1"])
+        let index = display.range(of: "用户协议").location
+        XCTAssertEqual(label.attributedText!.attribute(.foregroundColor, at: index, effectiveRange: nil) as? UIColor, .systemBlue)
+        guard let link = label.link(atCharacter: index) else { return XCTFail("no link") }
+        label.performTap(on: link)
+        XCTAssertEqual(tapped, ["h1:用户协议"])
+
+        // 改回默认符号后重新解析
+        label.tagOpenDelimiter = "<"
+        label.tagCloseDelimiter = ">"
+        XCTAssertEqual(label.attributedText!.string, "同意【h1】用户协议【/h1】和隐私")
+        XCTAssertEqual(label.tags.map { $0.name }, ["h2"])
+    }
+
+    func testRuleMatchCaptureGroupsWithMultiCharDelimiter() {
+        let label = ZLTagRichLabel(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        label.update { v in
+            v.tagOpenDelimiter = "{{"
+            v.tagCloseDelimiter = "}}"
+            v.text = "x {{h2}}ok{{/h2}}"
+        }
+        let match = label.matches.first { $0.rule.name == ZLTagRichLabel.tagRuleName }
+        XCTAssertEqual(match?.group(1), "h2", "group 1 为标签名")
+        XCTAssertEqual(match?.group(2), "ok", "group 2 为标签内容")
+    }
+}
+
+// MARK: - [] 标签 Label
+
+class BracketLabelTests: XCTestCase {
+
+    func testDefaultsToBrackets() {
+        let label = ZLBracketLabel(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        XCTAssertEqual(label.tagOpenDelimiter, "[")
+        XCTAssertEqual(label.tagCloseDelimiter, "]")
+        XCTAssertTrue(label is ZLTagRichLabel)
+    }
+
+    func testParsesBracketTags() {
+        let label = ZLBracketLabel(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        var tapped: [String] = []
+        label.update { v in
+            v.tagStyles = ["h1": [.foregroundColor: UIColor.systemBlue]]
+            v.onTagTap = { tapped.append("\($0.name):\($0.text)") }
+            v.text = "同意 [h1]用户协议[/h1] 和 [h2]隐私[h2/]，[h3]未闭合 <h1>尖括号</h1>"
+        }
+        let display = label.attributedText!.string as NSString
+        XCTAssertEqual(display as String, "同意 用户协议 和 隐私，[h3]未闭合 <h1>尖括号</h1>")
+        XCTAssertEqual(label.tags.map { "\($0.name):\($0.text)" }, ["h1:用户协议", "h2:隐私"])
+        XCTAssertEqual(label.tags.first?.raw, "[h1]用户协议[/h1]")
+        let index = display.range(of: "用户协议").location
+        XCTAssertEqual(label.attributedText!.attribute(.foregroundColor, at: index, effectiveRange: nil) as? UIColor, .systemBlue)
+        guard let link = label.link(atCharacter: index) else { return XCTFail("no link") }
+        label.performTap(on: link)
+        XCTAssertEqual(tapped, ["h1:用户协议"])
+    }
+
+    func testCoderInitAndOverride() throws {
+        let archived = try NSKeyedArchiver.archivedData(withRootObject: ZLBracketLabel(frame: .zero), requiringSecureCoding: false)
+        let unarchiver = try NSKeyedUnarchiver(forReadingFrom: archived)
+        unarchiver.requiresSecureCoding = false
+        let decoded = try XCTUnwrap(ZLBracketLabel(coder: unarchiver))
+        XCTAssertEqual(decoded.tagOpenDelimiter, "[")
+        XCTAssertEqual(decoded.tagCloseDelimiter, "]")
+
+        // 仍可改成其他符号
+        let label = ZLBracketLabel(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
+        label.tagOpenDelimiter = "<"
+        label.tagCloseDelimiter = ">"
+        label.text = "[h1]a[/h1]<h1>b</h1>"
+        XCTAssertEqual(label.attributedText!.string, "[h1]a[/h1]b")
+    }
+}

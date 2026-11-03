@@ -120,6 +120,10 @@ final class HTagDemoPage: UIViewController {
         case30()
         // ZLTextStyle 链式配置
         case31()
+        // 自定义标签符号：[h] 【h】 {h} {{h}}
+        case32()
+        // 继承 ZLTagRichLabel：用 [] 表示标签
+        case33()
         stackView.addArrangedSubview(historyCard)
         if isTableDemo {
             tableCards = stackView.arrangedSubviews
@@ -1277,6 +1281,62 @@ final class HTagDemoPage: UIViewController {
 // MARK: - ZLTextStyle 链式配置
 
 /// 31. ZLTextStyle 链式配置：style / tagStyles / 高亮 / 规则 ctx 中都可以直接链式书写，不需要写字典
+/// 33. 继承 ZLTagRichLabel 的子类 ZLBracketLabel：默认用 [ ] 包裹标签
+private func case33() {
+    let name = "33. 子类 ZLBracketLabel（[ ] 标签）"
+    let source = "同意 [h1]用户协议[/h1] 和 [h2]隐私政策[h2/]，[h3]未闭合 原样显示；<h1>尖括号</h1> 不再识别"
+    let label = ZLBracketLabel(frame: .zero)
+    label.numberOfLines = 0
+    label.verticalAlignment = .top
+    label.update { v in
+        v.style = HTagDemoPage.baseStyle
+        v.tagStyles = [
+            "h1": .color(.mBlue).underline(),
+            "h2": .color(.mDeepOrange).underline(),
+        ]
+        v.tagHighlightStyle = .backgroundColor(UIColor.mBlue.withAlphaComponent(0.2))
+        v.onTagTap = { [weak self] info in self?.onTap(name, info) }
+        v.onParsed = { [weak self] tags in self?.onParsed(name, tags) }
+        v.text = source
+    }
+    let card = DemoCard(title: name, source: source, content: label)
+    cards[name] = card
+    stackView.addArrangedSubview(card)
+}
+
+/// 32. 自定义标签的开始 / 结束符号（tagOpenDelimiter / tagCloseDelimiter），其他解析规则不变
+private func case32() {
+    let samples: [(open: String, close: String, source: String)] = [
+        ("[", "]", "同意 [h1]用户协议[/h1] 和 [h2]隐私政策[h2/]，[h1]未闭合 原样显示；<h1>尖括号</h1> 不再识别"),
+        ("【", "】", "同意【h1】用户协议【/h1】和【h2】隐私政策【/h2】，【h3】不匹配【/h1】原样显示"),
+        ("{", "}", "同意 {h1}用户协议{/h1} 和 {h2}隐私政策{/h2}，{hx}不是标签{/hx}"),
+        ("{{", "}}", "多字符符号：{{b}}粗体 {{color value=\"#E91E63\"}}嵌套颜色{{/color}}{{/b}}、{{a href=\"https://github.com\"}}GitHub{{/a}}"),
+    ]
+    for (index, sample) in samples.enumerated() {
+        let name = "32\(["a", "b", "c", "d"][index]). 自定义标签符号 \(sample.open) \(sample.close)"
+        _ = addCase(name, source: sample.source) { v in
+            v.tagOpenDelimiter = sample.open
+            v.tagCloseDelimiter = sample.close
+            if sample.open == "{{" {
+                // 任意标签 + 属性 + 嵌套，符号换成 {{ }} 后同样可用
+                v.tagNamePattern = ZLTagParserConfiguration.anyTagName
+                v.allowsNestedTags = true
+                v.tagStyles = [
+                    "b": .boldFont(15),
+                    "a": .color(.mBlue).underline(),
+                ]
+                v.tagStyleBuilder = { info in info.colorAttribute("value").map { .color($0) } }
+            } else {
+                v.tagStyles = [
+                    "h1": .color(.mBlue).underline(),
+                    "h2": .color(.mDeepOrange).underline(),
+                ]
+                v.tagHighlightStyle = .backgroundColor(UIColor.mBlue.withAlphaComponent(0.2))
+            }
+        }
+    }
+}
+
 private func case31() {
     let name = "31. ZLTextStyle 链式配置"
     let source = "<title>链式配置样式</title> <new>NEW</new>\n"

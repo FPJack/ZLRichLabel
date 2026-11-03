@@ -7,6 +7,7 @@
 //  可与外部添加的正则规则一起使用（按优先级处理重叠）。
 //
 //  标签写法：`<h1>文字</h1>` 或 `<h1>文字<h1/>`，开闭标签名必须一致（不区分大小写）
+//  通过 `tagOpenDelimiter` / `tagCloseDelimiter` 可以把 `<` `>` 换成 `[` `]`、`【` `】`、`{` `}` 等符号；
 //  通过 `tagNamePattern` / `allowsNestedTags` / `allowsSelfClosingTags` 可以识别任意标签名、
 //  解析标签属性（`<a href="…">`、`<color value="#f00">`）并支持嵌套，见 `ZLTagParser`
 //
@@ -282,6 +283,19 @@ open class ZLTagRichLabel: ZLRichLabel {
         set { tagConfiguration.allowsSelfClosing = newValue }
     }
 
+    /// 标签的开始符号，默认 `<`。可改为 `[`、`【`、`{` 等（支持多个字符，例如 `{{`），其他解析规则不变：
+    /// `label.tagOpenDelimiter = "["; label.tagCloseDelimiter = "]"` → 识别 `[h1]文字[/h1]`、`[h1]文字[h1/]`
+    open var tagOpenDelimiter: String {
+        get { return tagConfiguration.openDelimiter }
+        set { tagConfiguration.openDelimiter = newValue }
+    }
+
+    /// 标签的结束符号，默认 `>`。可改为 `]`、`】`、`}` 等（支持多个字符，例如 `}}`）
+    open var tagCloseDelimiter: String {
+        get { return tagConfiguration.closeDelimiter }
+        set { tagConfiguration.closeDelimiter = newValue }
+    }
+
     // MARK: 解析结果
 
     /// 当前解析出的所有标签（先序：外层在前，内层标签的 `parent` 指向外层）
@@ -451,3 +465,5 @@ open class ZLTagRichLabel: ZLRichLabel {
         }
     }
 }
+
+

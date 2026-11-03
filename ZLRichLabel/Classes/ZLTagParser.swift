@@ -4,6 +4,8 @@
 //
 //  可配置的标签解析器：任意标签名（`<b>`、`<a href="…">`、`<color value="#f00">`）、标签属性、嵌套、容错。
 //  `ZLTagRichLabel` 用它实现内置的标签规则；也可以单独使用（`ZLTagParser.tags(in:configuration:)`）。
+//  标签的开始 / 结束符号可配置（`ZLTagParserConfiguration.openDelimiter` / `closeDelimiter`），
+//  例如 `[h1]文字[/h1]`、`【h1】文字【/h1】`、`{h1}文字{/h1}`，其他规则不变。
 //  同时提供 `<h>` 标签的简单解析 `ZLTagParser.parse(_:)` / `tags(_:)`（原 `HTagParser`）。
 //
 //  容错规则：
@@ -25,6 +27,10 @@ public struct ZLTagParserConfiguration: Equatable {
     public var allowsNesting: Bool
     /// 是否支持自闭合空标签，例如 `<br/>`、`<icon name="star"/>`
     public var allowsSelfClosing: Bool
+    /// 标签的开始符号，默认 `<`。例如 `[`、`【`、`{`、`{{`（可以是多个字符，空字符串按 `<` 处理）
+    public var openDelimiter: String
+    /// 标签的结束符号，默认 `>`。例如 `]`、`】`、`}`、`}}`（可以是多个字符，空字符串按 `>` 处理）
+    public var closeDelimiter: String
 
     /// 任意标签名：字母开头，可包含字母、数字、`_`、`-`、`:`
     public static let anyTagName = "[a-z][a-z0-9_:-]*"
@@ -35,11 +41,19 @@ public struct ZLTagParserConfiguration: Equatable {
     /// 任意标签名 + 嵌套 + 自闭合
     public static let anyTags = ZLTagParserConfiguration(namePattern: anyTagName, allowsNesting: true, allowsSelfClosing: true)
 
-    public init(namePattern: String = "h\\d*", allowsNesting: Bool = false, allowsSelfClosing: Bool = false) {
+    public init(namePattern: String = "h\\d*", allowsNesting: Bool = false, allowsSelfClosing: Bool = false,
+                openDelimiter: String = "<", closeDelimiter: String = ">") {
         self.namePattern = namePattern
         self.allowsNesting = allowsNesting
         self.allowsSelfClosing = allowsSelfClosing
+        self.openDelimiter = openDelimiter
+        self.closeDelimiter = closeDelimiter
     }
+
+    /// 实际使用的开始符号（空字符串时为 `<`）
+    var effectiveOpenDelimiter: String { return openDelimiter.isEmpty ? "<" : openDelimiter }
+    /// 实际使用的结束符号（空字符串时为 `>`）
+    var effectiveCloseDelimiter: String { return closeDelimiter.isEmpty ? ">" : closeDelimiter }
 }
 
 /// 解析出的标签元素（树结构）
@@ -119,9 +133,23 @@ public final class ZLTagParser: NSObject {
 
     // swiftlint:disable force_try
     /// 标签：group 1 为 `/`（闭合），group 2 为标签名，group 3 为属性，group 4 为 `/`（自闭合）
-    private static let tokenRegex = try! NSRegularExpression(
-        pattern: "<(/)?([a-z][a-z0-9_:-]*)((?:\\s+[^\\s=/>\"']+(?:\\s*=\\s*(?:\"[^\"]*\"|'[^']*'|[^\\s\"'=<>`]+))?)*)\\s*(/)?>",
-        options: [.caseInsensitive])
+    /// 开始 / 结束符号可配置（默认 `<` / `>`），按符号组合缓存
+    private static var tokenRegexCache: [String: NSRegularExpression] = [:]
+
+    private static func tokenRegex(open: String, close: String) -> NSRegularExpression {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        let key = open + "\u{0}" + close
+        if let regex = tokenRegexCache[key] { return regex }
+        let o = NSRegularExpression.escapedPattern(for: open)
+        let c = NSRegularExpression.escapedPattern(for: close)
+        // 属性名 / 无引号的属性值里不能出现开始、结束符号的字符
+        let excluded = Set((open + close).unicodeScalars).map { String(format: "\\x{%X}", $0.value) }.sorted().joined()
+        let pattern = "\(o)(/)?([a-z][a-z0-9_:-]*)((?:\\s+[^\\s=/\"'\(excluded)]+(?:\\s*=\\s*(?:\"[^\"]*\"|'[^']*'|[^\\s\"'=`\(excluded)]+))?)*)\\s*(/)?\(c)"
+        let regex = try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+        tokenRegexCache[key] = regex
+        return regex
+    }
 
     /// 属性：group 1 为名称，group 2 / 3 / 4 为双引号 / 单引号 / 无引号的值
     private static let attributeRegex = try! NSRegularExpression(
@@ -206,6 +234,7 @@ public final class ZLTagParser: NSObject {
             append(.element(element))
         }
 
+        let tokenRegex = self.tokenRegex(open: configuration.effectiveOpenDelimiter, close: configuration.effectiveCloseDelimiter)
         for token in tokenRegex.matches(in: source, options: [], range: NSRange(location: 0, length: ns.length)) {
             let range = token.range
             if range.location > cursor {
@@ -345,6 +374,16 @@ public final class ZLTagParser: NSObject {
         return tags(in: source, configuration: configuration)
     }
 
+    /// 同上，可自定义标签的开始 / 结束符号，例如 `[h1]文字[/h1]`：openDelimiter 为 `[`，closeDelimiter 为 `]`
+    @objc(tagsInString:namePattern:allowsNesting:allowsSelfClosing:openDelimiter:closeDelimiter:)
+    public static func tags(in source: String, namePattern: String, allowsNesting: Bool, allowsSelfClosing: Bool,
+                            openDelimiter: String, closeDelimiter: String) -> [ZLTagInfo] {
+        let configuration = ZLTagParserConfiguration(namePattern: namePattern, allowsNesting: allowsNesting,
+                                                     allowsSelfClosing: allowsSelfClosing,
+                                                     openDelimiter: openDelimiter, closeDelimiter: closeDelimiter)
+        return tags(in: source, configuration: configuration)
+    }
+
     /// 任意标签名的正则（`[a-z][a-z0-9_:-]*`），配合 `tagNamePattern` / `tagsInString:namePattern:…` 使用
     @objc public static var anyTagNamePattern: String { return ZLTagParserConfiguration.anyTagName }
 }
@@ -385,7 +424,8 @@ final class ZLTagMarkupExpression: NSRegularExpression, @unchecked Sendable {
         return document(for: string).roots.compactMap { element in
             guard NSLocationInRange(element.range.location, range) || element.range.location == range.location,
                   NSMaxRange(element.range) <= NSMaxRange(range) else { return nil }
-            let nameRange = NSRange(location: element.openRange.location + 1, length: (element.name as NSString).length)
+            let openLength = (configuration.effectiveOpenDelimiter as NSString).length
+            let nameRange = NSRange(location: element.openRange.location + openLength, length: (element.name as NSString).length)
             var ranges = [element.range, nameRange, element.contentRange]
             return NSTextCheckingResult.regularExpressionCheckingResult(ranges: &ranges, count: ranges.count,
                                                                          regularExpression: self)

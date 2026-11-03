@@ -630,6 +630,10 @@ static NSString *OCQuote(NSString *s) {
     [self case30];
     // ZLTextStyle 链式配置（ZLTextStyleMaker）
     [self case31];
+    // 自定义标签符号：[h] 【h】 {h} {{h}}
+    [self case32];
+    // 继承 ZLTagRichLabel：用 [] 表示标签
+    [self case33];
     [self.stackView addArrangedSubview:self.historyCard];
 
     [self refreshTapViews];
@@ -2165,6 +2169,67 @@ static NSString *OCQuote(NSString *s) {
 
 /// 31. ZLTextStyleMaker：Objective-C 中用 block 链式配置样式，`.style` 取出字典，
 /// 可用于 style / tagStyles / tagHighlightStyle / ctx addAttributes: / ctx.highlightStyle / ctx setText:attributes:
+/// 33. 继承 ZLTagRichLabel 的子类 ZLBracketLabel：默认用 [ ] 包裹标签
+- (void)case33 {
+    NSString *name = @"33. 子类 ZLBracketLabel（[ ] 标签）";
+    NSString *source = @"同意 [h1]用户协议[/h1] 和 [h2]隐私政策[h2/]，[h3]未闭合 原样显示；<h1>尖括号</h1> 不再识别";
+    ZLBracketLabel *label = [[ZLBracketLabel alloc] initWithFrame:CGRectZero];
+    label.numberOfLines = 0;
+    label.verticalAlignment = ZLLabelVerticalAlignmentTop;
+    __weak typeof(self) weakSelf = self;
+    [label updateTag:^(ZLTagRichLabel *v) {
+        v.style = OCDemoViewController.baseStyle;
+        v.tagStyles = @{
+            @"h1": ZLTextStyleMaker.make.color(kBlue).underline().style,
+            @"h2": ZLTextStyleMaker.make.color(kDeepOrange).underline().style,
+        };
+        v.tagHighlightStyle = ZLTextStyleMaker.make.backgroundColor([kBlue colorWithAlphaComponent:0.2]).style;
+        v.onTagTap = ^(ZLTagInfo *info) { [weakSelf onTap:name info:info action:nil]; };
+        v.onParsed = ^(NSArray<ZLTagInfo *> *tags) { [weakSelf onParsed:name tags:tags]; };
+        v.text = source;
+    }];
+    OCDemoCard *card = [[OCDemoCard alloc] initWithTitle:name source:source content:label];
+    self.cards[name] = card;
+    [self.stackView addArrangedSubview:card];
+}
+
+/// 32. 自定义标签的开始 / 结束符号（tagOpenDelimiter / tagCloseDelimiter），其他解析规则不变
+- (void)case32 {
+    NSArray<NSArray<NSString *> *> *samples = @[
+        @[@"[", @"]", @"同意 [h1]用户协议[/h1] 和 [h2]隐私政策[h2/]，[h1]未闭合 原样显示；<h1>尖括号</h1> 不再识别"],
+        @[@"【", @"】", @"同意【h1】用户协议【/h1】和【h2】隐私政策【/h2】，【h3】不匹配【/h1】原样显示"],
+        @[@"{", @"}", @"同意 {h1}用户协议{/h1} 和 {h2}隐私政策{/h2}，{hx}不是标签{/hx}"],
+        @[@"{{", @"}}", @"多字符符号：{{b}}粗体 {{color value=\"#E91E63\"}}嵌套颜色{{/color}}{{/b}}、{{a href=\"https://github.com\"}}GitHub{{/a}}"],
+    ];
+    NSArray<NSString *> *suffixes = @[@"a", @"b", @"c", @"d"];
+    [samples enumerateObjectsUsingBlock:^(NSArray<NSString *> *sample, NSUInteger idx, BOOL *stop) {
+        NSString *open = sample[0], *close = sample[1];
+        NSString *name = [NSString stringWithFormat:@"32%@. 自定义标签符号 %@ %@", suffixes[idx], open, close];
+        [self addCase:name source:sample[2] configure:^(ZLTagRichLabel *v) {
+            v.tagOpenDelimiter = open;
+            v.tagCloseDelimiter = close;
+            if ([open isEqualToString:@"{{"]) {
+                v.tagNamePattern = ZLTagParser.anyTagNamePattern;
+                v.allowsNestedTags = YES;
+                v.tagStyles = @{
+                    @"b": ZLTextStyleMaker.make.boldFont(15).style,
+                    @"a": ZLTextStyleMaker.make.color(kBlue).underline().style,
+                };
+                v.tagStyleBuilder = ^NSDictionary<NSAttributedStringKey, id> *(ZLTagInfo *info) {
+                    UIColor *color = [info colorAttributeNamed:@"value"];
+                    return color ? ZLTextStyleMaker.make.color(color).style : nil;
+                };
+            } else {
+                v.tagStyles = @{
+                    @"h1": ZLTextStyleMaker.make.color(kBlue).underline().style,
+                    @"h2": ZLTextStyleMaker.make.color(kDeepOrange).underline().style,
+                };
+                v.tagHighlightStyle = ZLTextStyleMaker.make.backgroundColor([kBlue colorWithAlphaComponent:0.2]).style;
+            }
+        }];
+    }];
+}
+
 - (void)case31 {
     NSString *name = @"31. ZLTextStyle 链式配置（ZLTextStyleMaker）";
     NSString *source = @"<title>链式配置样式</title> <new>NEW</new>\n"
