@@ -634,6 +634,8 @@ static NSString *OCQuote(NSString *s) {
     [self case32];
     // 继承 ZLTagRichLabel：用 [] 表示标签
     [self case33];
+    // 段落间距（paragraphSpacing）
+    [self case34];
     [self.stackView addArrangedSubview:self.historyCard];
 
     [self refreshTapViews];
@@ -2189,6 +2191,67 @@ static NSString *OCQuote(NSString *s) {
         v.text = source;
     }];
     OCDemoCard *card = [[OCDemoCard alloc] initWithTitle:name source:source content:label];
+    self.cards[name] = card;
+    [self.stackView addArrangedSubview:card];
+}
+
+/// 34. 段落间距（paragraphSpacing）：每个段落之间额外留白，和 lineSpacing 区分开
+- (void)case34 {
+    NSString *name = @"34. 段落间距（paragraphSpacing）";
+    NSString *source = @"第一段：普通正文，展示段落之间的额外留白。<h1>可点击标签</h1> 和 @alice。\n"
+                       @"\n"
+                       @"第二段：保持同样字号，段内行距较小；切换 paragraphSpacing 时，只有段与段之间的间隔变化。\n"
+                       @"\n"
+                       @"第三段：用于对比 lineSpacing（段内）和 paragraphSpacing（段间）的区别。";
+
+    ZLTagRichLabel *label = [[ZLTagRichLabel alloc] initWithFrame:CGRectZero];
+    label.numberOfLines = 0;
+    label.verticalAlignment = ZLLabelVerticalAlignmentTop;
+
+    UISegmentedControl *spacing = [[UISegmentedControl alloc] initWithItems:@[@"0", @"8", @"16", @"24"]];
+    spacing.selectedSegmentIndex = 2;
+    NSArray<NSNumber *> *values = @[@0, @8, @16, @24];
+
+    __weak typeof(self) weakSelf = self;
+    __weak ZLTagRichLabel *weakLabel = label;
+    void (^apply)(CGFloat) = ^(CGFloat value) {
+        ZLTagRichLabel *strongLabel = weakLabel;
+        if (!strongLabel) { return; }
+        [strongLabel updateTag:^(ZLTagRichLabel *v) {
+            NSMutableParagraphStyle *paragraph = [NSMutableParagraphStyle new];
+            paragraph.lineSpacing = 4;
+            paragraph.paragraphSpacing = value;
+            NSMutableDictionary *style = [OCDemoViewController.baseStyle mutableCopy];
+            style[NSParagraphStyleAttributeName] = paragraph;
+            v.style = style;
+            v.tagStyles = @{@"h1": @{NSForegroundColorAttributeName: kBlue,
+                                      NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)}};
+            [v removeAllRules];
+            [v addRuleWithName:@"mention" pattern:@"@\\w+" options:0 priority:0 error:nil
+                       handler:^(ZLRichRuleContext *ctx) {
+                [ctx addAttributes:@{NSForegroundColorAttributeName: kPurple}];
+                ctx.onTap = ^(ZLRichMatch *match) { [weakSelf onTap:name info:[OCDemoViewController infoForMatch:match] action:@"点击 @"]; };
+            }];
+            v.onTagTap = ^(ZLTagInfo *info) { [weakSelf onTap:name info:info action:nil]; };
+            v.text = source;
+        }];
+        [UIView animateWithDuration:0.2 animations:^{ [weakSelf.view layoutIfNeeded]; }];
+    };
+
+    [spacing addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+        apply(values[spacing.selectedSegmentIndex].doubleValue);
+    }] forControlEvents:UIControlEventValueChanged];
+
+    apply(values[spacing.selectedSegmentIndex].doubleValue);
+
+    UILabel *hint = [OCCardView label:@"lineSpacing 固定为 4；仅修改 paragraphSpacing"
+                                 font:[UIFont systemFontOfSize:11]
+                                color:[UIColor colorWithWhite:0 alpha:0.45]];
+    UIStackView *content = [[UIStackView alloc] initWithArrangedSubviews:@[hint, spacing, label]];
+    content.axis = UILayoutConstraintAxisVertical;
+    content.spacing = 8;
+
+    OCDemoCard *card = [[OCDemoCard alloc] initWithTitle:name source:source content:content];
     self.cards[name] = card;
     [self.stackView addArrangedSubview:card];
 }

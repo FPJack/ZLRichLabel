@@ -124,6 +124,8 @@ final class HTagDemoPage: UIViewController {
         case32()
         // 继承 ZLTagRichLabel：用 [] 表示标签
         case33()
+        // 段落间距（paragraphSpacing）
+        case34()
         stackView.addArrangedSubview(historyCard)
         if isTableDemo {
             tableCards = stackView.arrangedSubviews
@@ -1300,6 +1302,60 @@ private func case33() {
         v.text = source
     }
     let card = DemoCard(title: name, source: source, content: label)
+    cards[name] = card
+    stackView.addArrangedSubview(card)
+}
+
+/// 34. 段落间距（paragraphSpacing）：每个段落之间额外留白，和 lineSpacing 区分开
+private func case34() {
+    let name = "34. 段落间距（paragraphSpacing）"
+    let source = "第一段：普通正文，展示段落之间的额外留白。<h1>可点击标签</h1> 和 @alice。\n"
+        + ""
+        + "第二段：保持同样字号，段内行距较小；切换 paragraphSpacing 时，只有段与段之间的间隔变化。\n"
+        + ""
+        + "第三段：用于对比 lineSpacing（段内）和 paragraphSpacing（段间）的区别。"
+
+    let label = ZLTagRichLabel(frame: .zero)
+    label.numberOfLines = 0
+    label.verticalAlignment = .top
+
+    let spacing = UISegmentedControl(items: ["0", "8", "16", "24"])
+    spacing.selectedSegmentIndex = 2
+    let values: [CGFloat] = [0, 8, 16, 24]
+
+    let lineSpacing: CGFloat = 0
+    let apply: (CGFloat) -> Void = { [weak self] value in
+        guard let self = self else { return }
+        label.update { v in
+            let p = NSMutableParagraphStyle()
+            p.lineSpacing = lineSpacing
+            p.paragraphSpacing = value
+            v.style = HTagDemoPage.baseStyle.merging([.paragraphStyle: p]) { _, new in new }
+            v.tagStyles = ["h1": .color(.mBlue).underline()]
+            v.removeAllRules()
+            try? v.addRule(name: "mention", pattern: "@\\w+") { [weak self] ctx in
+                ctx.addAttributes(.color(.mPurple))
+                ctx.onTap = { [weak self] match in self?.onRuleTap(name, match, action: "点击 @") }
+            }
+            v.onTagTap = { [weak self] info in self?.onTap(name, info) }
+            v.text = source
+        }
+        UIView.animate(withDuration: 0.2) { self.view.layoutIfNeeded() }
+    }
+
+    spacing.addAction(UIAction { _ in
+        apply(values[spacing.selectedSegmentIndex])
+    }, for: .valueChanged)
+
+    apply(values[spacing.selectedSegmentIndex])
+
+    let hint = CardView.label("lineSpacing 固定为 4；仅修改 paragraphSpacing", font: .systemFont(ofSize: 11),
+                              color: UIColor(white: 0, alpha: 0.45))
+    let content = UIStackView(arrangedSubviews: [hint, spacing, label])
+    content.axis = .vertical
+    content.spacing = 8
+
+    let card = DemoCard(title: name, source: source, content: content)
     cards[name] = card
     stackView.addArrangedSubview(card)
 }

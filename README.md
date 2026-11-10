@@ -1090,7 +1090,7 @@ Example 工程通过 Swift Package Manager 引用仓库根目录的本地包（`
 
 | 页面 | 入口 | 内容 |
 | --- | --- | --- |
-| `HTagDemoPage.swift` | 首页 | `ZLTagRichLabel` / `ZLRichLabel` 全部功能，用例 1 – 29（见下表） |
+| `HTagDemoPage.swift` | 首页 | `ZLTagRichLabel` / `ZLRichLabel` 全部功能，用例 1 – 34（见下表） |
 | `OCDemoViewController.m` | 导航栏左上角「OC」 | 与首页内容一致的 Objective-C 版本 |
 | `SwiftUIDemoPage.swift` | 导航栏右上角「SwiftUI」 | `ZLRichText`：基础用法与点击、输入时高度实时变化、展开 / 收起与 `@State` 同步、`.lineLimit`、规则 + 胶囊 + 渐变、`List` 中自适应行高 |
 | `AttributedLabelDemoPage.swift` | 导航栏右上角「Base」 | 底层 `ZLAttributedLabel`，用例 1 – 13（见下表） |
@@ -1118,6 +1118,7 @@ Example 工程通过 Swift Package Manager 引用仓库根目录的本地包（`
 | 31 | `ZLTextStyle` 链式配置：正文、按标签名样式（加粗 / 斜体 / 下划线 / 删除线 / 渐变 / 阴影 / 字间距 / 徽章）、按下高亮、规则中的胶囊和行内代码都用链式写法；OC 版用 `ZLTextStyleMaker` |
 | 32a–32d | 自定义标签符号：`[h1]…[/h1]`、`【h1】…【/h1】`、`{h1}…{/h1}`，以及多字符 `{{b}}…{{/b}}` 加属性和嵌套；闭合写法、容错与 `<` `>` 一致，换符号后 `<h1>` 原样显示 |
 | 33 | 子类 `ZLBracketLabel`：默认用 `[h1]…[/h1]` 表示标签，样式、点击、按下高亮与 `ZLTagRichLabel` 一致 |
+| 34 | 段落间距 `paragraphSpacing`：固定 `lineSpacing`，切换 0/8/16/24 的段落间距，观察仅段与段之间留白变化；保留标签点击和 @ 规则点击 |
 
 页面顶部会显示最近一次点击得到的完整信息，底部有点击历史。
 

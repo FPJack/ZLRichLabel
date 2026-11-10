@@ -238,9 +238,7 @@
 					};
 					607FACE41AFB9204008FA782 = {
 						CreatedOnToolsVersion = 6.3.1;
-						DevelopmentTeam = 6ZA44MJL83;
 						LastSwiftMigration = 0900;
-						ProvisioningStyle = Manual;
 						TestTargetID = 607FACCF1AFB9204008FA782;
 					};
 				};
@@ -521,7 +519,7 @@
 					"@executable_path/Frameworks",
 				);
 				MODULE_NAME = ExampleApp;
-				PRODUCT_BUNDLE_IDENTIFIER = fanpengtest;
+				PRODUCT_BUNDLE_IDENTIFIER = fanpengtest1;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OBJC_BRIDGING_HEADER = "ZLRichLabel/ZLRichLabel_Example-Bridging-Header.h";
@@ -546,7 +544,7 @@
 					"@executable_path/Frameworks",
 				);
 				MODULE_NAME = ExampleApp;
-				PRODUCT_BUNDLE_IDENTIFIER = fanpengtest;
+				PRODUCT_BUNDLE_IDENTIFIER = fanpengtest1;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OBJC_BRIDGING_HEADER = "ZLRichLabel/ZLRichLabel_Example-Bridging-Header.h";
@@ -560,9 +558,9 @@
 			baseConfigurationReference = 4B05CBC6B68B37FC1DA3A4A2 /* Pods-ZLRichLabel_Tests.debug.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Manual;
-				DEVELOPMENT_TEAM = "";
-				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = 6ZA44MJL83;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 45VN9U3A54;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(PLATFORM_DIR)/Developer/Library/Frameworks",
 					"$(inherited)",
@@ -577,10 +575,9 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.wws.richtext;
+				PRODUCT_BUNDLE_IDENTIFIER = fanpengtest1;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "glcoalme-dev-all";
 				SWIFT_SWIFT3_OBJC_INFERENCE = Default;
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ZLRichLabel_Example.app/ZLRichLabel_Example";
@@ -592,9 +589,9 @@
 			baseConfigurationReference = 92C4077E3E63FD214AE09FE8 /* Pods-ZLRichLabel_Tests.release.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Manual;
-				DEVELOPMENT_TEAM = "";
-				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = 6ZA44MJL83;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 45VN9U3A54;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(PLATFORM_DIR)/Developer/Library/Frameworks",
 					"$(inherited)",
@@ -605,10 +602,9 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.wws.richtext;
+				PRODUCT_BUNDLE_IDENTIFIER = fanpengtest1;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "glcoalme-dev-all";
 				SWIFT_SWIFT3_OBJC_INFERENCE = Default;
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ZLRichLabel_Example.app/ZLRichLabel_Example";
